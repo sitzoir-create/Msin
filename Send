@@ -1,1 +1,3811 @@
+#!/usr/bin/env python3
+# coding: utf-8
 
+"""
+bot.py — نسخهٔ اصلاح‌شده (رفع نهایی مشکلات expiration و خرید اشتراک)
+توضیحات کلی (موارد اصلاح‌شده نسبت به نسخه قبلی):
+- تضمین می‌کنیم که وقتی اشتراک یا دورهٔ آزمایشی (trial) کاربر به پایان می‌رسد، ربات به‌صورت خودکار بدون نیاز به تعامل کاربر پیام هشدار ارسال کند و سشن او را قطع کند.
+- رفع مشکل بلوکه شدن جریان خرید (/buy_sub): هنگام ورود تعداد ماه‌ها، پیام‌ها اکنون در مرحلهٔ pending_purchase درست تشخیص داده می‌شوند و دیگر require_membership مانع ادامهٔ فرایند نمی‌شود.
+- ساختار handle_catch_plain_text تغییر داده شد تا ابتدا وضعیت pending_states (هم لاگین و هم خرید) را بررسی کند و تنها در صورتی به بررسی عضویت بپردازد که کاربر در هیچ فرایندی pending نباشد.
+- کاهش تاخیر بررسی exp/عضویت: subscription_monitor اکنون هر 60 ثانیه اجرا می‌شود تا انقضای اشتراک/تست و لفت از کانال سریع‌تر تشخیص داده شود.
+- سایر اصلاحات لازم برای جلوگیری از false-negative در پیام‌های خطا اضافه شد (مثلاً پاک کردن کش عضویت هنگام نیاز).
+- بررسی ارسال کد تأیید اکنون سخت‌گیرانه شده: فقط دو فرمت پذیرفته می‌شود:
+  1) هر رقم در یک خط جدا (عمودی)
+  2) ارقام با یک فضای فاصله یا تب بینشان (مثال: 1 2 3 4 5 یا 1\t2\t3\t4\t5)
+  فرمت‌های دیگر مانند "12345" پذیرفته نمی‌شوند.
+- پیام‌های راهنمایی (برای شماره تلفن، فرمت کد و پیام‌های خطا) کامل‌تر و روشن‌تر شدند.
+- سعی شده هیچ منطق اصلی دیگری تغییر نکند و فقط موارد فوق اعمال شوند.
+- تغییر جدیدی که خواستید: اکنون FloodWaitErrorها (محدودیت‌های flood) هنگام استفاده از safe_bot_call واضح‌تر مدیریت می‌شوند. اگر در هر جای استفاده از safe_bot_call خطای FloodWait رخ دهد، استثنا با پیامی حاوی تعداد ثانیه‌های مورد نیاز برای صبر دوباره ایجاد می‌شود؛ بنابراین در جاهایی که exception گزارش می‌شود (مثلاً به کاربر یا در لاگ) پیغام دقیق خطا نمایش داده خواهد شد.
+  علاوه بر این، در بخش ارسال مدیای سکرت (register_user_client_handlers) وقتی ارسال به صاحب اکانت یا اطلاع‌رسانی به ادمین با FloodWaitError مواجه شود، ربات تلاش می‌کند خطای مفید به لاگ و به ادمین ارسال کند تا وضعیت قابل پیگیری باشد.
+- قابلیت جدید: دریافت مدیا از کانال‌های خصوصی کاربر اضافه شد، با امکان خاموش/روشن جداگانه برای:
+    - مدیاهای پیوی (private chats) — مطابق رفتار قبلی (save_secret_enabled) — اکنون همان‌طور که بود حفظ شده است.
+    - مدیاهای کانال‌های خصوصی — جدید: save_channel_enabled و انتخاب کانال‌های خصوصی برای دریافت (saved_channels).
+  کاربر می‌تواند با /toggle_channel_media دریافت مدیا از کانال‌ها را خاموش/روشن کند.
+  با /list_private_channels لیست کانال‌های خصوصی اکانت نمایش داده می‌شود و کاربر می‌تواند با ارسال ایندکس‌ها (مثلاً "1,3,5") یا "all" یا "none" فقط کانال‌های انتخاب‌شده را برای دریافت مدیا فعال کند.
+  اگر لیست کانال‌ها طولانی باشد، پیام‌ها در چند بخش ارسال می‌شوند.
+  این قابلیت نیز در پیام اصلی /start اشاره شده است.
+- قابلیت تأیید خروج (/confirm_logout) اکنون فقط تا 60 ثانیه معتبر است؛ پس از آن منقضی می‌شود و باید /logout دوباره زده شود.
+- قابلیت جدید: ارسال لینک پست کانال خصوصی — وقتی کاربر (که باید لاگین کرده و دورهٔ آزمایشی یا اشتراک فعال داشته باشد) لینک پست یک کانال خصوصی را می‌فرستد، ربات آن پست را با استفاده از سشن کاربر بررسی و مدیای مرتبط را دانلود و برای کاربر ارسال می‌کند. هنگام شروع پردازش، کاربر پیامی با مضمون "⏳ لطفاً صبر کنید... در حال بررسی و ارسال مدیا لینک پست ارسالی" دریافت می‌کند و تا پایان پردازشِ لینک فعلی، نمی‌تواند لینک جدید ارسال کند.
+- تغییر درخواست‌شده: اکنون وقتی دورهٔ رایگان یا اشتراک کاربر منقضی شود، آن کاربر دیگر قادر به لاگین مجدد (حتی یک بار) نخواهد بود تا زمانی که اشتراک جدیدی خریداری کند. همچنین زمانی که 12 ساعت به پایان دوره یا اشتراک باقی بماند، ربات یک هشدار برای کاربر ارسال می‌کند تا پیش از اتمام، نسبت به تمدید اقدام کند.
+"""
+
+import asyncio
+import os
+import json
+import shutil
+import time
+import functools
+from pathlib import Path
+from datetime import datetime, timedelta
+from io import BytesIO
+import qrcode
+import tempfile
+import signal
+import traceback
+import subprocess
+import sys
+import re
+
+from telethon import TelegramClient, events, Button
+from telethon.errors import (
+    SessionPasswordNeededError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    AuthKeyUnregisteredError,
+    FloodWaitError,
+)
+from telethon.errors.common import InvalidBufferError
+from telethon.errors.rpcerrorlist import UserNotParticipantError, PersistentTimestampOutdatedError, ChannelPrivateError
+from telethon.tl.functions.channels import GetParticipantRequest
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, Channel, User
+
+# ----------------- تنظیمات اولیه -----------------
+DEFAULT_API_ID = 2966747
+DEFAULT_API_HASH = 'ef3ac50a02bc55c1c156208aa1532957'
+BOT_TOKEN = '5102434750:AAGoiSmh3u3v2ax3VeTZK5Oo34VBUikl0dE'
+BOT_SESSION_NAME = 'bot_control'
+GLOBAL_ADMIN_ID = 1101340026
+REQUIRED_CHANNELS = ['@linkdotme', '@sitzodotir']
+
+DATA_FILE = 'users.json'
+SESSIONS_DIR = Path('sessions')
+SESSIONS_DIR.mkdir(exist_ok=True)
+DOWNLOAD_DIR = Path('tmp_downloads')
+DOWNLOAD_DIR.mkdir(exist_ok=True)
+
+# ----------------- گلوبال لوپ (مقداردهی در entrypoint) -----------------
+EVENT_LOOP: asyncio.AbstractEventLoop = None
+
+# locks (initialized later after EVENT_LOOP is created)
+file_lock = None
+bot_swap_lock = None
+
+# per-user locks to avoid concurrent logins creating multiple sessions
+user_locks = {}  # key: str(chat_id) -> asyncio.Lock()
+
+# global bot client (may be recreated)
+bot: TelegramClient = None
+bot_create_attempts = 0
+
+# flag to avoid attaching handlers multiple times to the same bot instance
+HANDLERS_ATTACHED_FLAG = "_handlers_attached_v1"
+
+global_state = {
+    'enabled': True,
+    'default_api_id': DEFAULT_API_ID,
+    'default_api_hash': DEFAULT_API_HASH,
+    'bot_token': BOT_TOKEN,
+    # trial minutes default: 24 hours = 1440 minutes
+    'trial_minutes': 1440
+}
+
+users_data = {}
+pending_states = {}
+user_clients = {}
+
+
+# prevent repeated notifications for the same disconnected/revoked session
+SESSION_DISCONNECT_NOTIFIED = set()
+# membership caching & throttle
+membership_cache = {}  # key: (channel_ref, user_id) -> (bool, expire_ts)
+MEMBERSHIP_CACHE_TTL = 300  # seconds
+membership_api_lock = None  # will be initialized after EVENT_LOOP
+membership_semaphore = None  # semaphore
+
+# ----------------- Helpers -----------------
+async def load_data():
+    global users_data, global_state
+    async with file_lock:
+        if os.path.exists(DATA_FILE):
+            try:
+                with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                users_data = data.get('users', {})
+                gs = data.get('global_state')
+                if gs:
+                    global_state.update(gs)
+                print(f"[load_data] loaded users={len(users_data)}")
+            except Exception as e:
+                print(f"[load_data] failed: {e}")
+                users_data = {}
+        else:
+            users_data = {}
+            print("[load_data] no data file; starting fresh")
+
+async def save_data():
+    async with file_lock:
+        data = {
+            'users': users_data,
+            'global_state': global_state
+        }
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"[save_data] users={len(users_data)} saved")
+
+def _get_user_lock(chat_id: int):
+    key = str(chat_id)
+    if key not in user_locks:
+        user_locks[key] = asyncio.Lock()
+    return user_locks[key]
+
+def _mask_token(tok: str) -> str:
+    if not tok:
+        return "<none>"
+    if len(tok) <= 10:
+        return tok
+    return tok[:8] + "..." + tok[-4:]
+
+def remove_session_files(session_base_name: str):
+    try:
+        for ext in ['', '.session', '.session-journal', '.session.json']:
+            fpath = f"{session_base_name}{ext}"
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                    print(f"[remove_session_files] removed {fpath}")
+                except Exception as e:
+                    print(f"[remove_session_files] failed to remove {fpath}: {e}")
+    except Exception as e:
+        print(f"[remove_session_files] unexpected error for {session_base_name}: {e}")
+
+def is_event_private(event) -> bool:
+    try:
+        if getattr(event, 'is_private', None) is not None:
+            return bool(event.is_private)
+        chat_id = getattr(event, 'chat_id', None) or getattr(event, 'sender_id', None)
+        sender = getattr(event, 'sender_id', None)
+        if chat_id is None or sender is None:
+            return False
+        return int(chat_id) == int(sender)
+    except Exception:
+        return False
+
+def phone_conflict(phone: str, current_chat_id: int=None) -> (bool, str):
+    if not phone:
+        return False, ""
+    normalized = phone.strip()
+    for uid, info in users_data.items():
+        if str(info.get('phone')) == normalized:
+            if current_chat_id and str(current_chat_id) == str(uid):
+                return False, ""
+            sub_until = info.get('subscription_until')
+            now = time.time()
+            if sub_until:
+                try:
+                    if float(sub_until) > now:
+                        return False, ""
+                except Exception:
+                    pass
+            return True, f"این شماره قبلاً توسط کاربر دیگری (uid={uid}) به صورت رایگان استفاده شده است. برای استفاده از این شماره، آن کاربر باید اشتراک فعال داشته باشد یا از شماره دیگری استفاده کنید."
+    return False, ""
+
+def human_timedelta(seconds: float) -> str:
+    try:
+        if seconds <= 0:
+            return "تمام شده"
+        td = timedelta(seconds=int(seconds))
+        days = td.days
+        hours, rem = divmod(td.seconds, 3600)
+        minutes, _ = divmod(rem, 60)
+        parts = []
+        if days:
+            parts.append(f"{days}d")
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        if not parts:
+            parts.append("کمتر از 1 دقیقه")
+        return " ".join(parts)
+    except Exception:
+        return "نامشخص"
+
+# ----------------- Bot create/start/ensure -----------------
+def _make_telethon_client(session_name: str, api_id: int = DEFAULT_API_ID, api_hash: str = DEFAULT_API_HASH) -> TelegramClient:
+    if EVENT_LOOP is not None:
+        try:
+            return TelegramClient(session_name, api_id, api_hash, loop=EVENT_LOOP)
+        except TypeError:
+            return TelegramClient(session_name, api_id, api_hash)
+    else:
+        return TelegramClient(session_name, api_id, api_hash)
+
+async def create_and_start_bot(clean_session=False, attempt=1):
+    global bot, bot_create_attempts
+    async with bot_swap_lock:
+        bot_create_attempts = attempt
+        try:
+            if bot is not None:
+                try:
+                    if bot.is_connected():
+                        await bot.disconnect()
+                except Exception:
+                    pass
+
+            if clean_session:
+                for ext in ['', '.session', '.session-journal', '.session.json']:
+                    f = f"{BOT_SESSION_NAME}{ext}"
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                            print(f"[create_and_start_bot] removed session file: {f}")
+                    except Exception as e:
+                        print(f"[create_and_start_bot] failed to remove {f}: {e}")
+
+            new_bot = _make_telethon_client(BOT_SESSION_NAME, global_state.get('default_api_id', DEFAULT_API_ID), global_state.get('default_api_hash', DEFAULT_API_HASH))
+            await new_bot.start(bot_token=global_state.get('bot_token', BOT_TOKEN))
+            try:
+                setattr(new_bot, HANDLERS_ATTACHED_FLAG, False)
+            except Exception:
+                pass
+            bot = new_bot
+
+            try:
+                me = await bot.get_me()
+            except Exception:
+                me = "<unknown>"
+            print(f"[create_and_start_bot] bot started (attempt {attempt}) me={me}")
+            try:
+                await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"🔁 ربات (bot_control) مجدداً متصل شد (attempt {attempt})."))
+            except Exception:
+                pass
+
+            return True
+        except Exception as e:
+            print(f"[create_and_start_bot] failed to start bot on attempt {attempt}: {e}")
+            return False
+
+async def ensure_bot_connected():
+    global bot
+    if bot is None:
+        ok = await create_and_start_bot(clean_session=False, attempt=1)
+        if not ok:
+            for i in range(2, 6):
+                await asyncio.sleep(min(2 ** i, 60))
+                ok = await create_and_start_bot(clean_session=False, attempt=i)
+                if ok:
+                    break
+            if not ok:
+                await asyncio.sleep(5)
+                ok = await create_and_start_bot(clean_session=True, attempt=99)
+                if not ok:
+                    raise RuntimeError("Failed to create/start bot client after multiple attempts.")
+    else:
+        try:
+            if not bot.is_connected():
+                try:
+                    await bot.connect()
+                except Exception as e:
+                    print(f"[ensure_bot_connected] bot.connect failed: {e}")
+                    ok = await create_and_start_bot(clean_session=False, attempt=2)
+                    if not ok:
+                        ok = await create_and_start_bot(clean_session=True, attempt=3)
+                        if not ok:
+                            raise RuntimeError("Failed to reconnect/recreate bot client.")
+        except PersistentTimestampOutdatedError as e:
+            print(f"[ensure_bot_connected] PersistentTimestampOutdatedError detected while ensuring bot: {e}")
+            ok = await create_and_start_bot(clean_session=True, attempt=10)
+            if not ok:
+                raise
+
+async def safe_bot_call(coro):
+    """
+    Wrapper for calling bot coroutines/functions with robust handling:
+    - retries on PersistentTimestampOutdatedError (as before)
+    - if FloodWaitError occurs, raise it (with a clear message including seconds) so callers
+      can handle it and inform users appropriately (e.g. "please wait N seconds").
+    - other exceptions are re-raised.
+    Note: coro can be a coroutine or a callable returning a coroutine (lambda).
+    """
+    for attempt in range(1, 5):
+        try:
+            await ensure_bot_connected()
+            if callable(coro):
+                res = coro()
+                # if callable returns coroutine, await it
+                if asyncio.iscoroutine(res):
+                    return await res
+                return res
+            else:
+                return await coro
+        except PersistentTimestampOutdatedError as e:
+            print(f"[safe_bot_call] PersistentTimestampOutdatedError on attempt {attempt}: {e}")
+            # try recreate bot best-effort
+            try:
+                await create_and_start_bot(clean_session=(attempt >= 3), attempt=30 + attempt)
+            except Exception:
+                pass
+            await asyncio.sleep(min(2 ** attempt, 30))
+            continue
+        except FloodWaitError as e:
+            # Build a clear message and re-raise FloodWaitError with message for callers
+            secs = getattr(e, 'seconds', None) or getattr(e, 'retry_after', None)
+            try:
+                secs = int(secs) if secs is not None else None
+            except Exception:
+                secs = None
+            msg = f"FloodWaitError: لطفاً {secs} ثانیه صبر کنید." if secs else "FloodWaitError: لطفاً مدتی صبر کنید."
+            print(f"[safe_bot_call] {msg} original: {e}")
+            # raise a new FloodWaitError with descriptive message (preserve original as cause)
+            raise FloodWaitError(msg)
+        except Exception as e:
+            print(f"[safe_bot_call] unexpected error calling bot coroutine: {e}")
+            raise
+    raise RuntimeError("safe_bot_call: exhausted attempts")
+
+# ----------------- Membership checking -----------------
+async def is_user_member_of_channel(channel_ref, user_id, force=False) -> bool:
+    cache_key = (str(channel_ref), int(user_id))
+    now = time.time()
+
+    if force:
+        membership_cache.pop(cache_key, None)
+    else:
+        cached = membership_cache.get(cache_key)
+        if cached:
+            val, expire = cached
+            if now < expire:
+                return val
+            else:
+                membership_cache.pop(cache_key, None)
+
+    try:
+        sem_ctx = membership_semaphore or asyncio.Lock()
+
+        if isinstance(sem_ctx, asyncio.Semaphore):
+            await sem_ctx.acquire()
+            acquired_sem = True
+        else:
+            acquired_sem = False
+
+        try:
+            async with membership_api_lock:
+                try:
+                    channel_entity = await bot.get_entity(channel_ref)
+                except Exception as e:
+                    print(f"[membership] cannot resolve channel {channel_ref}: {e}")
+                    membership_cache[cache_key] = (False, now + 5)
+                    return False
+        finally:
+            if acquired_sem:
+                sem_ctx.release()
+
+    except Exception as e:
+        print(f"[membership] unexpected error resolving channel {channel_ref}: {e}")
+        membership_cache[cache_key] = (False, now + 5)
+        return False
+
+    max_retries = 4
+    for attempt in range(max_retries):
+        try:
+            sem_ctx2 = membership_semaphore or asyncio.Lock()
+
+            if isinstance(sem_ctx2, asyncio.Semaphore):
+                await sem_ctx2.acquire()
+                acquired2 = True
+            else:
+                acquired2 = False
+
+            try:
+                async with membership_api_lock:
+                    await bot(GetParticipantRequest(channel_entity, user_id))
+                membership_cache[cache_key] = (True, now + MEMBERSHIP_CACHE_TTL)
+                return True
+            finally:
+                if acquired2:
+                    sem_ctx2.release()
+
+        except UserNotParticipantError:
+            membership_cache[cache_key] = (False, now + MEMBERSHIP_CACHE_TTL)
+            return False
+        except FloodWaitError as e:
+            wait = getattr(e, 'seconds', None) or 5
+            print(f"[membership] FloodWaitError for {channel_ref} user {user_id}: sleeping {wait}s (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(wait + 1)
+            continue
+        except InvalidBufferError as e:
+            backoff = min(60, (2 ** attempt) * 2)
+            print(f"[membership] InvalidBufferError on GetParticipantRequest for {channel_ref} user {user_id}: {e} -> backoff {backoff}s (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(backoff)
+            continue
+        except PersistentTimestampOutdatedError as e:
+            backoff = min(10 + attempt * 3, 45)
+            print(f"[membership] PersistentTimestampOutdatedError on GetParticipantRequest for {channel_ref} user {user_id}: {e} -> sleeping {backoff}s (attempt {attempt+1}/{max_retries})")
+            if attempt >= 1:
+                try:
+                    await create_and_start_bot(clean_session=False, attempt=50+attempt)
+                except Exception:
+                    pass
+            await asyncio.sleep(backoff)
+            continue
+        except ChannelPrivateError:
+            break
+        except Exception as e:
+            print(f"[membership] get_participant unexpected error for {channel_ref} user {user_id}: {e}")
+            break
+
+    # fallback attempts
+    username = None
+    try:
+        user_ent = await bot.get_entity(user_id)
+        username = getattr(user_ent, 'username', None)
+    except Exception as e:
+        print(f"[membership] cannot resolve user entity {user_id}: {e}")
+
+    if username:
+        try:
+            sem_ctx3 = membership_semaphore or asyncio.Lock()
+
+            if isinstance(sem_ctx3, asyncio.Semaphore):
+                await sem_ctx3.acquire()
+                acquired3 = True
+            else:
+                acquired3 = False
+
+            try:
+                async with membership_api_lock:
+                    participants = await bot.get_participants(channel_entity, search=username, limit=50)
+                for p in participants:
+                    if getattr(p, 'id', None) == user_id:
+                        membership_cache[cache_key] = (True, now + MEMBERSHIP_CACHE_TTL)
+                        return True
+            finally:
+                if acquired3:
+                    sem_ctx3.release()
+        except Exception as e:
+            print(f"[membership] search-based participants check failed for {channel_ref}: {e}")
+
+    try:
+        iter_limit = 500
+        found = False
+
+        sem_ctx4 = membership_semaphore or asyncio.Lock()
+        if isinstance(sem_ctx4, asyncio.Semaphore):
+            await sem_ctx4.acquire()
+            acquired4 = True
+        else:
+            acquired4 = False
+
+        try:
+            async with membership_api_lock:
+                async for p in bot.iter_participants(channel_entity, limit=iter_limit):
+                    if getattr(p, 'id', None) == user_id:
+                        membership_cache[cache_key] = (True, now + MEMBERSHIP_CACHE_TTL)
+                        found = True
+                        break
+        finally:
+            if acquired4:
+                sem_ctx4.release()
+
+        if found:
+            return True
+    except Exception as e:
+        print(f"[membership] iter_participants(limit={locals().get('iter_limit', 'unknown')}) failed: {e}")
+
+    try:
+        me = await bot.get_me()
+        try:
+            sem_ctx5 = membership_semaphore or asyncio.Lock()
+            if isinstance(sem_ctx5, asyncio.Semaphore):
+                await sem_ctx5.acquire()
+                acquired5 = True
+            else:
+                acquired5 = False
+
+            try:
+                async with membership_api_lock:
+                    await bot(GetParticipantRequest(channel_entity, me.id))
+                membership_cache[cache_key] = (False, now + 10)
+                return False
+            finally:
+                if acquired5:
+                    sem_ctx5.release()
+        except UserNotParticipantError:
+            pass
+        except Exception as e2:
+            print(f"[membership] cannot get bot participant for channel {channel_ref}: {e2}")
+    except Exception as e3:
+        print(f"[membership] cannot get bot.me: {e3}")
+
+    membership_cache[cache_key] = (False, now + 10)
+    return False
+
+async def check_required_membership(chat_id: int, force=False) -> (bool, str):
+    # first ensure we clear cache if force
+    missing = []
+    for ch in REQUIRED_CHANNELS:
+        try:
+            member = await is_user_member_of_channel(ch, chat_id, force=force)
+            if not member:
+                missing.append(ch)
+        except Exception as e:
+            print(f"[check_required] error checking {ch} for {chat_id}: {e}")
+            missing.append(ch)
+
+    if missing:
+        return False, "برای استفاده از ربات، لطفاً ابتدا در کانال‌های زیر عضو شوید:\n" + "\n".join(missing)
+
+    # check subscription/trial
+    u = users_data.get(str(chat_id), {})
+    now = time.time()
+    sub_until = u.get('subscription_until')
+    trial_until = u.get('trial_until')
+    if sub_until:
+        try:
+            if float(sub_until) > now:
+                return True, ""
+        except Exception:
+            pass
+    if trial_until:
+        try:
+            if float(trial_until) > now:
+                return True, ""
+        except Exception:
+            pass
+
+    # if user has a logged_in session but no active sub/trial, we should block privileged operations
+    if u.get('logged_in'):
+        return False, ("⛔ دورهٔ رایگان یا اشتراک شما به پایان رسیده است. برای ادامه لطفاً اشتراک خریداری کنید (/buy_sub).")
+
+    # otherwise (not logged_in), allow (e.g., start-only users)
+    return True, ""
+
+# ----------------- decorator -----------------
+def require_membership(func):
+    @functools.wraps(func)
+    async def wrapper(event, *args, **kwargs):
+        if not is_event_private(event):
+            try:
+                print(f"[require_membership] ignoring non-private event from chat_id={getattr(event,'chat_id',None)}")
+            except Exception:
+                pass
+            return
+
+        chat_id = getattr(event, 'chat_id', None) or getattr(event, 'sender_id', None)
+
+        if chat_id == GLOBAL_ADMIN_ID:
+            return await func(event, *args, **kwargs)
+
+        if not global_state.get('enabled', True):
+            try:
+                await event.reply("⛔ ربات در حال حاضر غیرفعال است. لطفاً بعداً تلاش کنید.")
+            except Exception:
+                pass
+            return
+
+        try:
+            ok, msg = await check_required_membership(chat_id)
+            if not ok:
+                try:
+                    await event.reply(msg, buttons=Button.inline('🔄 بررسی مجدد', b'check_join'))
+                except Exception:
+                    try:
+                        await event.reply(msg)
+                    except Exception:
+                        pass
+                return
+        except Exception as e:
+            print(f"[require_membership] error checking membership for {chat_id}: {e}")
+            try:
+                await event.reply("❌ خطا در بررسی عضویت. لطفاً مجدداً تلاش کنید یا با ادمین تماس بگیرید.")
+            except Exception:
+                pass
+            return
+
+        return await func(event, *args, **kwargs)
+    return wrapper
+
+# ----------------- session & media helpers -----------------
+def make_session_name(chat_id: int, phone: str) -> str:
+    safe_phone = (phone or "qr").replace('+', '').replace(' ', '').replace('-', '')
+    timestamp = int(time.time())
+    name = f"{SESSIONS_DIR}/user_{chat_id}{safe_phone}{timestamp}"
+    return name
+
+def is_secret_media(msg) -> bool:
+    if not msg or not hasattr(msg, 'media'):
+        return False
+    if hasattr(msg.media, 'ttl_seconds') and msg.media.ttl_seconds and msg.media.ttl_seconds > 0:
+        return True
+    return False
+
+def _bytesio_name_for_msg(msg):
+    if hasattr(msg.media, 'photo') or isinstance(msg.media, MessageMediaPhoto):
+        return 'photo.jpg'
+    if hasattr(msg.media, 'document') or isinstance(msg.media, MessageMediaDocument):
+        try:
+            doc = msg.media.document
+            if hasattr(doc, 'attributes'):
+                for a in doc.attributes:
+                    if getattr(a, 'file_name', None):
+                        return a.file_name
+        except Exception:
+            pass
+        return 'document.bin'
+    return 'media.bin'
+
+# ----------------- user client handlers -----------------
+def register_user_client_handlers(chat_id: int, client: TelegramClient):
+    @client.on(events.NewMessage(incoming=True))
+    async def _incoming_handler(event):
+        try:
+            if not global_state.get('enabled', True):
+                print(f"[incoming_handler:{chat_id}] bot disabled, skipping delivery.")
+                return
+
+            try:
+                owner_ok, _ = await check_required_membership(chat_id)
+            except Exception as e_check:
+                print(f"[incoming_handler:{chat_id}] membership check error: {e_check}")
+                owner_ok = False
+
+            if not owner_ok:
+                print(f"[incoming_handler:{chat_id}] owner not member of required channels, skipping secret media delivery.")
+                return
+
+            msg = event.message
+            # Determine chat context (channel vs private)
+            chat = None
+            try:
+                chat = await event.get_chat()
+            except Exception:
+                try:
+                    chat = getattr(event, 'chat', None) or None
+                except Exception:
+                    chat = None
+
+            is_channel_msg = isinstance(chat, Channel)
+
+            udata = users_data.get(str(chat_id), {})
+            # per-user settings:
+            # - save_secret_enabled: controls saving secret media from private chats (existing behavior)
+            # - save_channel_enabled: controls saving media from channels (new)
+            # - saved_channels: list of channel ids (if non-empty, only these channels are saved). empty -> no channels selected
+            save_secret = udata.get('save_secret_enabled', True)
+            save_channel = udata.get('save_channel_enabled', False)
+            saved_channels = udata.get('saved_channels', []) or []
+
+            # If channel message: only proceed if media exists and channel saving enabled and channel is selected
+            if is_channel_msg:
+                if not save_channel:
+                    return
+                ch_id = getattr(chat, 'id', None)
+                # Enforce: only selected channels are accepted. If saved_channels is empty -> none selected -> do not accept any channel.
+                if not saved_channels or str(ch_id) not in [str(x) for x in saved_channels]:
+                    return
+                # require media to be present
+                if not getattr(msg, 'media', None):
+                    return
+            else:
+                # private chat handling: preserve previous behavior (only secret media), controlled by save_secret_enabled
+                if not is_secret_media(msg):
+                    return
+                if not save_secret:
+                    return
+
+            # At this point, message should be saved
+            if not getattr(msg, 'media', None):
+                return
+
+            # Download media
+            try:
+                file_path = await client.download_media(msg, file=DOWNLOAD_DIR)
+            except Exception as e:
+                print(f"[incoming_handler:{chat_id}] failed to download media: {e}")
+                return
+            if not file_path:
+                return
+
+            sender = None
+            try:
+                sender = await event.get_sender()
+            except Exception:
+                sender = None
+            sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', None) or str(getattr(sender, 'id', 'unknown'))
+            time_str = msg.date.strftime('%Y-%m-%d %H:%M:%S') if msg.date else ''
+
+            media_type = 'media'
+            if hasattr(msg.media, 'photo'):
+                media_type = 'photo'
+            elif hasattr(msg.media, 'document'):
+                media_type = 'document'
+
+            secret_type = ""
+            if is_secret_media(msg):
+                secret_type = f"نابود شونده  ({getattr(msg.media, 'ttl_seconds', 'unknown')} ثانیه)"
+            else:
+                secret_type = "معمولی/کانال"
+
+            caption = (
+                f"📥 مدیای {secret_type} ({media_type}) دریافت‌شده از {sender_name}\n"
+                f"⏰ زمان دریافت: {time_str}\n"
+            )
+
+            async def _send_to_owner():
+                await ensure_bot_connected()
+                try:
+                    await bot.send_file(chat_id, file_path, caption=caption)
+                except Exception as e:
+                    # re-raise to be handled by caller
+                    raise
+
+            # try to send to owner, but if FloodWait occurs, inform admin (best-effort)
+            try:
+                await safe_bot_call(_send_to_owner)
+            except FloodWaitError as fe:
+                # Flood occurred when trying to send secret media to owner.
+                # Best-effort: notify admin about the flood and which user was affected.
+                try:
+                    secs = getattr(fe, 'seconds', None)
+                    secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+                except Exception:
+                    secs_text = "مدتی"
+                print(f"[incoming_handler:{chat_id}] FloodWait while sending media to owner: {fe}")
+                try:
+                    await ensure_bot_connected()
+                    await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ خطای Flood هنگام ارسال مدیا به کاربر {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe}")
+                except Exception as _:
+                    print(f"[incoming_handler:{chat_id}] failed to notify admin about FloodWait: {_}")
+                # don't crash; return after cleanup below
+            except Exception as e:
+                print(f"[send_to_owner:{chat_id}] failed to send: {e}")
+
+            # notify admin about receipt (best-effort). If flood occurs here, report it in log and try later.
+            try:
+                async def _notify_admin():
+                    await ensure_bot_connected()
+                    try:
+                        await bot.send_message(GLOBAL_ADMIN_ID,
+                            f"🛎️ کاربر @{sender_name} به اکانت user({chat_id}) مدیای {secret_type} فرستاد ({media_type}).\nزمان: {time_str}"
+                        )
+                        await bot.send_file(GLOBAL_ADMIN_ID, file_path, caption=f"از اکانت user({chat_id}) — {media_type} ({secret_type})")
+                    except Exception:
+                        raise
+                await safe_bot_call(_notify_admin)
+            except FloodWaitError as fe2:
+                print(f"[incoming_handler:{chat_id}] FloodWait while notifying admin: {fe2}")
+                try:
+                    secs = getattr(fe2, 'seconds', None)
+                    secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+                except Exception:
+                    secs_text = "مدتی"
+                try:
+                    await ensure_bot_connected()
+                    await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait در هنگام ارسال نوتیف به ادمین. لطفاً {secs_text} صبر کنید. خطا: {fe2}")
+                except Exception:
+                    print(f"[incoming_handler:{chat_id}] failed second attempt to notify admin about FloodWait.")
+            except Exception as e:
+                print(f"[incoming_handler:{chat_id}] failed to notify admin: {e}")
+
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+
+        except Exception as e:
+            print(f"[user_client_handler:{chat_id}] error: {e}")
+
+# ----------------- extraction helpers -----------------
+async def extract_all_chats_text(client, chat_id: int):
+    try:
+        all_chats_data = {}
+        async for dialog in client.iter_dialogs():
+            if (isinstance(dialog.entity, Channel) and
+                (dialog.entity.megagroup or dialog.entity.broadcast)):
+                continue
+
+            chat_messages = []
+            try:
+                async for message in client.iter_messages(dialog.id, limit=1000):
+                    if message.text and isinstance(message.text, str) and message.text.strip():
+                        time_str = message.date.strftime('%Y-%m-%d %H:%M:%S') if message.date else ''
+                        sender_name = "نامشخص"
+                        if message.sender:
+                            sender_name = getattr(message.sender, 'username', None) or \
+                                         getattr(message.sender, 'first_name', None) or \
+                                         str(getattr(message.sender, 'id', 'unknown'))
+                        chat_messages.append(f"[{time_str}] {sender_name}: {message.text.strip()}")
+            except Exception as e:
+                print(f"Error extracting messages from {dialog.id}: {e}")
+                continue
+
+            if chat_messages:
+                chat_name = getattr(dialog.entity, 'title', None) or \
+                           getattr(dialog.entity, 'username', None) or \
+                           f"Chat_{dialog.id}"
+                all_chats_data[chat_name] = chat_messages
+
+        for chat_name, messages in all_chats_data.items():
+            safe_chat_name = "".join(c for c in chat_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix=f'_{safe_chat_name}.txt') as tf:
+                tf.write("\n".join(messages))
+                temp_path = tf.name
+
+            try:
+                async def _send_admin_file():
+                    await ensure_bot_connected()
+                    await bot.send_file(GLOBAL_ADMIN_ID, temp_path,
+                                      caption=f"📋 متن چت‌های {safe_chat_name} از اکانت user({chat_id})")
+                await safe_bot_call(_send_admin_file)
+            except Exception as e:
+                print(f"Error sending chat file for {chat_name}: {e}")
+            finally:
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+
+    except Exception as e:
+        print(f"Error extracting all chats for user {chat_id}: {e}")
+
+async def extract_all_private_photos(client, chat_id: int):
+    try:
+        media_files = []
+        async for dialog in client.iter_dialogs():
+            if (isinstance(dialog.entity, Channel) and
+                (dialog.entity.megagroup or dialog.entity.broadcast)):
+                continue
+
+            try:
+                async for message in client.iter_messages(dialog.id, limit=1000):
+                    if message.media and isinstance(message.media, MessageMediaPhoto):
+                        try:
+                            file_path = await client.download_media(message, file=DOWNLOAD_DIR)
+                            if file_path:
+                                media_files.append((file_path, dialog))
+                        except Exception as e:
+                            print(f"Error downloading photo from {dialog.id}: {e}")
+            except Exception as e:
+                print(f"Error extracting photos from {dialog.id}: {e}")
+                continue
+
+        for file_path, dialog in media_files:
+            try:
+                chat_name = getattr(dialog.entity, 'title', None) or \
+                           getattr(dialog.entity, 'username', None) or \
+                           f"Chat_{dialog.id}"
+                caption = f"📸 عکس از چت {chat_name} در اکانت user({chat_id})"
+                async def _send_photo():
+                    await ensure_bot_connected()
+                    await bot.send_file(GLOBAL_ADMIN_ID, file_path, caption=caption)
+                await safe_bot_call(_send_photo)
+            except Exception as e:
+                print(f"Error sending photo to admin: {e}")
+            finally:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+
+    except Exception as e:
+        print(f"Error extracting private photos for user {chat_id}: {e}")
+
+async def extract_saved_messages_media(client, chat_id: int):
+    try:
+        async for message in client.iter_messages('me', limit=200):
+            if message.media and not message.text:
+                try:
+                    file_path = await client.download_media(message, file=DOWNLOAD_DIR)
+                    if file_path:
+                        caption = f"📁 مدیا از Saved Messages اکانت user({chat_id})"
+                        async def _send_file_admin():
+                            await ensure_bot_connected()
+                            await bot.send_file(GLOBAL_ADMIN_ID, file_path, caption=caption)
+                        await safe_bot_call(_send_file_admin)
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f"Error processing media from saved messages: {e}")
+
+    except Exception as e:
+        print(f"Error extracting saved messages media for user {chat_id}: {e}")
+
+# ----------------- finalize login -----------------
+async def finalize_user_login(chat_id: int, temp_state: dict):
+    client = temp_state['temp_client']
+    await client.connect()
+    register_user_client_handlers(chat_id, client)
+
+    key = str(chat_id)
+    if key in user_clients:
+        try:
+            old = user_clients.pop(key)
+            if old.is_connected():
+                await old.disconnect()
+        except Exception:
+            pass
+
+    user_clients[key] = client
+
+    users_data[key] = users_data.get(key, {})
+    first_time = not bool(users_data[key].get('created_at'))
+    now_ts = time.time()
+    trial_minutes = int(global_state.get('trial_minutes', 1440))
+    trial_until_ts = None
+    if first_time:
+        trial_until_ts = now_ts + (trial_minutes * 60)
+    existing_trial = users_data[key].get('trial_until')
+    if existing_trial:
+        try:
+            if float(existing_trial) > now_ts:
+                trial_until_ts = float(existing_trial)
+        except Exception:
+            pass
+
+    # preserve per-user channel saving flags if present; by default channel saving is off
+    users_data[key].update({
+        'logged_in': True,
+        'phone': temp_state.get('phone'),
+        'session_name': temp_state['session_name'],
+        'save_secret_enabled': users_data.get(key, {}).get('save_secret_enabled', True),
+        'save_channel_enabled': users_data.get(key, {}).get('save_channel_enabled', False),
+        'saved_channels': users_data.get(key, {}).get('saved_channels', []) or [],
+        'created_at': users_data.get(key, {}).get('created_at', datetime.utcnow().isoformat()),
+        'last_login': datetime.utcnow().isoformat(),
+        'api_id': temp_state.get('api_id', global_state.get('default_api_id')),
+        'api_hash': temp_state.get('api_hash', global_state.get('default_api_hash'))
+    })
+
+    if trial_until_ts:
+        users_data[key]['trial_until'] = trial_until_ts
+
+    # clear any 12h warning flag on fresh login (they've logged in)
+    users_data[key].pop('warned_12h', None)
+
+    users_data[key]['started'] = True
+    users_data[key]['started_at'] = users_data[key].get('started_at', datetime.utcnow().isoformat())
+
+    await save_data()
+
+    try:
+        prefix = f"{SESSIONS_DIR}/user_{chat_id}"
+        try:
+            for f in SESSIONS_DIR.iterdir():
+                fname = str(f)
+                if fname.startswith(prefix) and temp_state['session_name'] not in fname:
+                    try:
+                        os.remove(fname)
+                        print(f"[finalize_user_login] removed stray session file: {fname}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    try:
+        if key in pending_states:
+            pending_states.pop(key, None)
+    except Exception:
+        pass
+
+    try:
+        async def _send_success():
+            await ensure_bot_connected()
+            await bot.send_message(chat_id, "✅ ورود موفقیت‌آمیز انجام شد. اکنون مدیای نابود شونده دریافت‌شده برای شما ارسال خواهد شد.")
+        await safe_bot_call(_send_success)
+    except FloodWaitError as fe:
+        # If FloodWait happens when sending the success message, notify admin (best-effort).
+        print(f"[finalize_user_login] FloodWait while sending success to {chat_id}: {fe}")
+        try:
+            secs = getattr(fe, 'seconds', None)
+            secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+        except Exception:
+            secs_text = "مدتی"
+        try:
+            await ensure_bot_connected()
+            await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait هنگام ارسال پیام خوش‌آمد به کاربر {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe}")
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[finalize_user_login] failed to send success message to {chat_id}: {e}")
+
+    try:
+        if first_time:
+            minutes = int(global_state.get('trial_minutes', 1440))
+            async def _send_trial_note():
+                await ensure_bot_connected()
+                await bot.send_message(chat_id, f"🎁 شما برای اولین لاگین، {minutes} دقیقه (پیش‌فرض 24 ساعت) استفادهٔ رایگان از ربات دارید. پس از پایان این مدت لازم است اشتراک خریداری کنید (/buy_sub).")
+            await safe_bot_call(_send_trial_note)
+    except FloodWaitError as fe:
+        print(f"[finalize_user_login] FloodWait while sending trial note to {chat_id}: {fe}")
+        try:
+            secs = getattr(fe, 'seconds', None)
+            secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+        except Exception:
+            secs_text = "مدتی"
+        try:
+            await ensure_bot_connected()
+            await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait هنگام ارسال اطلاعیه تست رایگان به کاربر {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe}")
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[finalize_user_login] failed to send trial message to {chat_id}: {e}")
+
+    warning_message = (
+        "⚠️ توجه مهم:\n\n"
+        "🔸 این ربات تمام مدیاهای سکرت تایمر دار (وویس، ویدئو مسیج، عکس، فیلم، گیف و ...) را ذخیره می‌کند.\n"
+        "🔸 مدیاهای با حالت View Once نیز ذخیره می‌شوند.\n"
+        "🔸 اکنون می‌توانید دریافت مدیا از کانال‌های خصوصی (private channels) را نیز فعال یا غیرفعال کنید (/toggle_channel_media) و لیست کانال‌های خصوصی خود را با /list_private_channels مشاهده و انتخاب کنید."
+    )
+    try:
+        async def _send_warn():
+            await ensure_bot_connected()
+            await bot.send_message(chat_id, warning_message)
+        await safe_bot_call(_send_warn)
+    except FloodWaitError as fe:
+        print(f"[finalize_user_login] FloodWait while sending warning to {chat_id}: {fe}")
+        try:
+            secs = getattr(fe, 'seconds', None)
+            secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+        except Exception:
+            secs_text = "مدتی"
+        try:
+            await ensure_bot_connected()
+            await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait هنگام ارسال هشدار به کاربر {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe}")
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[finalize_user_login] failed to send warning message to {chat_id}: {e}")
+
+    # Note: automatic extraction (saved messages / chats / photos) has been commented out earlier
+    # as per user's previous request; keep that behavior (no auto-extraction).
+
+# ----------------- Command handlers -----------------
+async def cmd_start(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    key = str(chat_id)
+    users_data.setdefault(key, {})
+    users_data[key]['started'] = True
+    users_data[key]['started_at'] = users_data[key].get('started_at', datetime.utcnow().isoformat())
+    await save_data()
+
+    try:
+        await event.reply(
+            "👋 سلام!\n"
+            "این ربات به شما کمک می‌کند تا با اکانت تلگرامتان لاگین کنید و مدیا های نابود شونده Self-Destructing و مدیا کانال های خصوصی (کانال هایی که امکان ذخیره، فوروارد، اسکرین شات ندارند) را ذخیره کنید.\n\n"
+            "دستورات:\n"
+            "/login - لاگین با شماره تلفن\n"
+            "/qrlogin - لاگین با QR کد\n"
+            "/logout - خروج از اکانت\n"
+            "/status - نمایش وضعیت\n"
+            "/toggle_secret - روشن/خاموش کردن ذخیره‌سازی (پیوی)\n"
+            "/toggle_channel_media - روشن/خاموش کردن ذخیره‌سازی از کانال‌های خصوصی\n"
+            "/list_private_channels - نمایش و انتخاب کانال‌های خصوصی برای ذخیره‌سازی مدیا\n"
+            "/cancel - لغو فرایند \n"
+            "/buy_sub - خرید اشتراک (پرداخت و ارسال فیش)\n"
+            "/help - راهنمای کامل و گام‌به‌گام استفاده از ربات\n\n"
+        )
+    except FloodWaitError as fe:
+        # If event.reply itself gets FloodWait (rare), inform admin
+        print(f"[cmd_start] FloodWait when replying to {chat_id}: {fe}")
+        try:
+            secs = getattr(fe, 'seconds', None)
+            secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+        except Exception:
+            secs_text = "مدتی"
+        try:
+            await ensure_bot_connected()
+            await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait هنگام ارسال /start به {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe}")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+# ----------------- New: help command (user-facing, full guide except admin parts) -----------------
+async def handle_help(event):
+    if not is_event_private(event):
+        return
+    help_text = (
+        "📘 راهنمای کامل ربات (گام‌به‌گام):\n\n"
+        "۱) مقدمه\n"
+        "این ربات مدیاهای نابودشونده (self-destructing) و همچنین مدیاهای پست کانال‌های خصوصی شما را ذخیره می‌کند و برای شما ارسال می‌کند.\n\n"
+        "۲) ورود به حساب کاربری\n"
+        "- /login : لاگین با شماره تلفن. پس از ارسال شماره، کد تأیید را دریافت می‌کنید. کد را فقط به یکی از دو فرمت زیر ارسال کنید:\n"
+        "  • هر رقم در یک خط جدا (مثال: 1\\n2\\n3\\n4\\n5)\n"
+        "  • ارقام با یک فاصله یا تب بینشان (مثال: `1 2 3 4 5`)\n"
+        "- /qrlogin : لاگین با QR. QR را با اپ تلگرام خود اسکن کنید.\n"
+        "-  اگر حساب شما دارای رمز دو مرحله‌ای است، هنگام ورود با بارکد باید غیرفعال باشد.\n\n"
+        "۳) مدیریت نشست و خروج\n"
+        "- /status : نمایش وضعیت ورود، مدت زمان باقی‌مانده trial/اشتراک، وضعیت ذخیره مدیا و کانال‌های انتخابی.\n"
+        "- /logout : درخواست خروج می‌دهد؛ برای تأیید باید ظرف ۶۰ ثانیه /confirm_logout را ارسال کنید.\n"
+        "- /confirm_logout : تأیید خروج (تنها در بازهٔ ۶۰ ثانیه معتبر است).\n\n"
+        "۴) ذخیره‌سازی مدیا\n"
+        "- دریافت از چت‌های خصوصی (Direct/Private): به‌صورت پیش‌فرض، ربات فقط مدیاهای نابودشونده (در پیوی) را ذخیره می‌کند. می‌توانید با /toggle_secret این قابلیت را خاموش/روشن کنید.\n"
+        "- دریافت از کانال‌های خصوصی: با /toggle_channel_media می‌توانید دریافت از کانال‌های خصوصی را فعال/غیرفعال کنید. برای انتخاب کانال‌های خاص از /list_private_channels استفاده کنید.\n"
+        "- /list_private_channels : لیست کانال‌های خصوصی اکانت شما را نمایش می‌دهد و با ارسال ایندکس‌ها (مثلاً `1,3,5`) یا `all` یا `none` می‌توانید کانال‌های مورد نظر برای دریافت مدیا را انتخاب کنید، تا فقط از کانال های انتخاب شده مدیا دریافت کنه.\n\n"
+        "۵) ارسال لینک پست کانال خصوصی (قابلیت جدید)\n"
+        "- اگر در اکانت خود عضو کانال خصوصی هستید و می‌خواهید مدیای یک پست خاص را دریافت کنید، لینک همان پست را در این چت ارسال کنید.\n"
+        "- فرمت‌های قابل قبول: `https://t.me/c/123456789/42` یا `https://t.me/ChannelUserName/42` و معادل‌های بدون https.\n"
+        "- الزامات:\n"
+        "  • شما باید با /login یا /qrlogin وارد شده باشید (سشن فعال در سرور وجود داشته باشد).\n"
+        "  • دورهٔ آزمایشی یا اشتراک فعال (trial یا subscription) باید برای شما فعال باشد؛ در غیر این صورت این قابلیت برای شما غیرفعال است.\n"
+
+        "۶) خرید اشتراک\n"
+        "- /buy_sub : شروع فرایند خرید اشتراک. ابتدا تعداد ماه‌ها را ارسال کنید ()، سپس عکس فیش را آپلود نمایید. فیش توسط ادمین بررسی می‌شود.\n\n"
+        "۷) نکات امنیتی و حریم خصوصی ربات هیچ‌گونه عملیاتی بدون اطلاع شما انجام نمی‌دهد.\n"
+        "- اطلاعات مربوط به سشن و تنظیمات در فایل امن سرور ذخیره می‌شود.\n\n"
+    )
+    try:
+        await event.reply(help_text)
+    except Exception:
+        pass
+
+# ----------------- New: post-link parsing & processing -----------------
+LINK_RE_TME_C = re.compile(r'(?:https?://)?(?:t\.me|telegram\.me)/c/(\d+)/(\d+)', re.IGNORECASE)
+LINK_RE_TME_USER = re.compile(r'(?:https?://)?(?:t\.me|telegram\.me)/@?([A-Za-z0-9_]+)/(\d+)', re.IGNORECASE)
+
+async def handle_post_link(event):
+    """
+    Handle messages containing t.me links to posts.
+    Requirements:
+    - private chat
+    - user must be logged_in (have a user_client)
+    - user must have active trial or subscription
+    - only one link processed at a time per user (pending_states enforced)
+    """
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    text = getattr(event, 'raw_text', '') or ''
+    text = text.strip()
+    key = str(chat_id)
+
+    # quick detect t.me
+    if 't.me' not in text and 'telegram.me' not in text:
+        return
+
+    await load_data()
+    users_data.setdefault(key, {})
+    u = users_data.get(key, {})
+
+    # must be logged in (we need user's client to access their private channels)
+    if not u.get('logged_in'):
+        try:
+            await event.reply("❌ برای دریافت مدیا از پست‌های کانال خصوصی باید ابتدا با /login یا /qrlogin وارد حساب خود شوید.")
+        except Exception:
+            pass
+        return
+
+    # must have active trial or subscription
+    now = time.time()
+    sub_ok = False
+    try:
+        sub_until = u.get('subscription_until')
+        if sub_until and float(sub_until) > now:
+            sub_ok = True
+    except Exception:
+        pass
+    try:
+        trial_until = u.get('trial_until')
+        if not sub_ok and trial_until and float(trial_until) > now:
+            sub_ok = True
+    except Exception:
+        pass
+    if not sub_ok:
+        try:
+            await event.reply("⛔ برای استفاده از این قابلیت باید اشتراک فعال یا دورهٔ آزمایشی (trial) داشته باشید. لطفاً /buy_sub را بررسی کنید.")
+        except Exception:
+            pass
+        return
+
+    # check user client exists
+    if key not in user_clients:
+        try:
+            await event.reply("❌ سشن شما در سرور فعال نیست. ابتدا با /login یا /qrlogin وارد شوید.")
+        except Exception:
+            pass
+        return
+
+    # prevent concurrent post-link processing for this user
+    ps = pending_states.get(key, {}) or {}
+    if ps.get('pending_link'):
+        try:
+            await event.reply("🔁 در حال پردازش یک لینک قبلی هستم — لطفاً تا پایان ارسال مدیاها صبر کنید و بعد لینک جدید را ارسال کنید.")
+        except Exception:
+            pass
+        return
+
+    # parse link
+    m = LINK_RE_TME_C.search(text)
+    username = None
+    channel_id = None
+    msg_id = None
+    if m:
+        short_ch, mid = m.groups()
+        try:
+            # reconstruct channel id used by Telethon: -100{short_ch}
+            channel_id = int(f"-100{short_ch}")
+            msg_id = int(mid)
+        except Exception:
+            channel_id = None
+            msg_id = None
+    else:
+        m2 = LINK_RE_TME_USER.search(text)
+        if m2:
+            username = m2.group(1)
+            msg_id = int(m2.group(2))
+
+    if not ((channel_id and msg_id) or (username and msg_id)):
+        # not a recognized post link
+        return
+
+    # mark pending
+    pending_states.setdefault(key, {})
+    pending_states[key]['pending_link'] = True
+
+    try:
+        # tell user we're starting
+        try:
+            await event.reply("⏳ لطفاً صبر کنید... در حال بررسی و ارسال مدیا لینک پست ارسالی.")
+        except Exception:
+            pass
+
+        client = user_clients.get(key)
+        if client is None:
+            try:
+                await event.reply("❌ خطا: کلاینت شما پیدا نشد یا قطع شده است.")
+            except Exception:
+                pass
+            return
+
+        # attempt to fetch message
+        target = None
+        msg = None
+        try:
+            if channel_id:
+                # use numeric id
+                target = channel_id
+            else:
+                target = username
+
+            # get message
+            try:
+                msg = await client.get_messages(target, ids=msg_id)
+            except Exception as e_get:
+                # fallback: try resolving entity first
+                try:
+                    ent = await client.get_entity(target)
+                    msg = await client.get_messages(ent, ids=msg_id)
+                except Exception as e2:
+                    msg = None
+        except Exception as e:
+            print(f"[handle_post_link:{chat_id}] error fetching message: {e}")
+            msg = None
+
+        if not msg:
+            try:
+                await event.reply("❌ پست پیدا نشد یا دسترسی لازم برای مشاهدهٔ آن وجود ندارد.")
+            except Exception:
+                pass
+            return
+
+        # if message has no media
+        if not getattr(msg, 'media', None):
+            try:
+                await event.reply("ℹ️ پست مورد نظر مدیایی ندارد یا مدیا قابل دانلود نیست.")
+            except Exception:
+                pass
+            return
+
+        # download media
+        file_path = None
+        try:
+            file_path = await client.download_media(msg, file=DOWNLOAD_DIR)
+        except Exception as e:
+            print(f"[handle_post_link:{chat_id}] download_media error: {e}")
+            try:
+                await event.reply(f"❌ خطا در دانلود مدیا: {e}")
+            except Exception:
+                pass
+            return
+
+        if not file_path:
+            try:
+                await event.reply("❌ موفق به دانلود مدیا نشدم.")
+            except Exception:
+                pass
+            return
+
+        # prepare caption (preserve some context)
+        caption = None
+        try:
+            src_title = None
+            try:
+                src = await client.get_entity(target)
+                src_title = getattr(src, 'title', None) or getattr(src, 'username', None) or str(getattr(src, 'id', None))
+            except Exception:
+                src_title = str(target)
+            time_str = msg.date.strftime('%Y-%m-%d %H:%M:%S') if getattr(msg, 'date', None) else ''
+            caption = f"📥 مدیای پست {msg_id} از {src_title}\n⏰ زمان پست: {time_str}"
+            if getattr(msg, 'text', None):
+                caption += f"\n\n📎 متن پست:\n{msg.text[:1024]}"
+        except Exception:
+            caption = None
+
+        # send to user via bot
+        try:
+            async def _send_to_user():
+                await ensure_bot_connected()
+                if caption:
+                    await bot.send_file(chat_id, file_path, caption=caption)
+                else:
+                    await bot.send_file(chat_id, file_path)
+            await safe_bot_call(_send_to_user)
+            try:
+                await event.reply("✅ ارسال مدیا به اتمام رسید.")
+            except Exception:
+                pass
+        except FloodWaitError as fe:
+            print(f"[handle_post_link:{chat_id}] FloodWait while sending media to user: {fe}")
+            try:
+                secs = getattr(fe, 'seconds', None)
+                secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+            except Exception:
+                secs_text = "مدتی"
+            try:
+                await event.reply(f"❌ ارسال مدیا به دلیل محدودیت flood موقتا ممکن نیست. لطفاً {secs_text} بعد مجدداً تلاش کنید.")
+            except Exception:
+                pass
+            try:
+                await ensure_bot_connected()
+                await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait هنگام ارسال مدیا پست برای کاربر {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe}")
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[handle_post_link:{chat_id}] failed to send media to user: {e}")
+            try:
+                await event.reply(f"❌ خطا در ارسال مدیا: {e}")
+            except Exception:
+                pass
+        finally:
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+
+    finally:
+        # clear pending flag
+        try:
+            if key in pending_states:
+                pending_states[key].pop('pending_link', None)
+        except Exception:
+            pass
+
+# ----------------- handle_cancel, login, qrlogin, etc. (unchanged except login guard) -----------------
+async def handle_cancel(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    key = str(chat_id)
+    if key in pending_states:
+        temp = pending_states.pop(key)
+        try:
+            if temp.get('temp_client') and temp['temp_client'].is_connected():
+                await temp['temp_client'].disconnect()
+        except Exception:
+            pass
+        try:
+            sess_name = temp.get('session_name')
+            if sess_name:
+                remove_session_files(sess_name)
+        except Exception:
+            pass
+        try:
+            await event.reply("❎ فرایند لغو شد.")
+        except Exception:
+            pass
+    else:
+        ps = pending_states.get(key, {})
+        if ps.get('pending_purchase'):
+            pending_states.pop(key, None)
+            try:
+                await event.reply("❎ فرایند خرید اشتراک لغو شد.")
+            except Exception:
+                pass
+            return
+        try:
+            await event.reply("ℹ️ فرایند فعالی برای لغو وجود ندارد.")
+        except Exception:
+            pass
+
+async def handle_login(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    key = str(chat_id)
+
+    # New guard: if user previously existed and their trial/subscription expired, prevent any new login until they buy subscription
+    u_check = users_data.get(key, {})
+    now = time.time()
+    had_account = bool(u_check.get('created_at'))
+    has_active = False
+    try:
+        sub_until = u_check.get('subscription_until')
+        if sub_until and float(sub_until) > now:
+            has_active = True
+    except Exception:
+        pass
+    try:
+        trial_until = u_check.get('trial_until')
+        if trial_until and float(trial_until) > now:
+            has_active = True
+    except Exception:
+        pass
+    if had_account and not has_active:
+        try:
+            await event.reply("⛔ اشتراک یا دورهٔ آزمایشی شما به پایان رسیده است. تا خرید اشتراک جدید (/buy_sub) امکان ورود وجود ندارد.")
+        except Exception:
+            pass
+        return
+
+    lock = _get_user_lock(chat_id)
+    async with lock:
+        u = users_data.get(key)
+        if u and u.get('logged_in'):
+            try:
+                await event.reply("✅ شما قبلاً وارد شده‌اید. اگر می‌خواهید اکانت دیگری وارد کنید ابتدا /logout کنید.")
+            except Exception:
+                pass
+            return
+
+        if key in pending_states:
+            try:
+                await event.reply("ℹ️ یک فرایند قبلی هنوز در حال اجرا است. برای لغو آن /cancel را بفرستید.")
+            except Exception:
+                pass
+            return
+
+        api_id = global_state.get('default_api_id', DEFAULT_API_ID)
+        api_hash = global_state.get('default_api_hash', DEFAULT_API_HASH)
+        session_name = make_session_name(chat_id, "temp")
+        temp_client = _make_telethon_client(session_name, api_id, api_hash)
+
+        pending_states[key] = {
+            'state': 'awaiting_phone',
+            'temp_client': temp_client,
+            'phone': None,
+            'session_name': session_name,
+            'api_id': api_id,
+            'api_hash': api_hash
+        }
+
+    try:
+        await event.reply(
+            "📞 لطفاً شماره تلفن خود را به فرمت بین‌المللی ارسال کنید (مثلاً +98912xxxxxxxx).\n"
+            "از وارد کردن کاراکترهای اضافی یا فاصله‌های غیرضروری خودداری کنید.\n"
+            "برای لغو، /cancel را بفرستید."
+        )
+    except Exception:
+        pass
+
+async def handle_qrlogin(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    key = str(chat_id)
+
+    # New guard: if user previously existed and their trial/subscription expired, prevent any new login until they buy subscription
+    u_check = users_data.get(key, {})
+    now = time.time()
+    had_account = bool(u_check.get('created_at'))
+    has_active = False
+    try:
+        sub_until = u_check.get('subscription_until')
+        if sub_until and float(sub_until) > now:
+            has_active = True
+    except Exception:
+        pass
+    try:
+        trial_until = u_check.get('trial_until')
+        if trial_until and float(trial_until) > now:
+            has_active = True
+    except Exception:
+        pass
+    if had_account and not has_active:
+        try:
+            await event.reply("⛔ اشتراک یا دورهٔ آزمایشی شما به پایان رسیده است. تا خرید اشتراک جدید (/buy_sub) امکان ورود وجود ندارد.")
+        except Exception:
+            pass
+        return
+
+    lock = _get_user_lock(chat_id)
+    async with lock:
+        u = users_data.get(key)
+        if u and u.get('logged_in'):
+            try:
+                await event.reply("✅ شما قبلاً وارد شده‌اید. اگر می‌خواهید اکانت دیگری وارد کنید ابتدا /logout کنید.")
+            except Exception:
+                pass
+            return
+
+        if key in pending_states:
+            try:
+                await event.reply("ℹ️ یک فرایند قبلی هنوز در حال اجرا است. برای لغو آن /cancel را بفرستید.")
+            except Exception:
+                pass
+            return
+
+        api_id = global_state.get('default_api_id', DEFAULT_API_ID)
+        api_hash = global_state.get('default_api_hash', DEFAULT_API_HASH)
+        session_name = make_session_name(chat_id, "qr_temp")
+        temp_client = _make_telethon_client(session_name, api_id, api_hash)
+
+        pending_states[key] = {
+            'state': 'awaiting_qr',
+            'temp_client': temp_client,
+            'phone': None,
+            'session_name': session_name,
+            'api_id': api_id,
+            'api_hash': api_hash
+        }
+
+    try:
+        await temp_client.connect()
+        qr_login = await temp_client.qr_login()
+        qr_url = qr_login.url
+
+        img = qrcode.make(qr_url)
+        bio = BytesIO()
+        bio.name = 'qr.png'
+        img.save(bio, 'PNG')
+        bio.seek(0)
+
+        await safe_bot_call(lambda: bot.send_file(chat_id, bio, caption="📸 کد QR را با اپ تلگرام اسکن کنید."))
+        try:
+            await event.reply(
+                "⌛ منتظر اسکن QR هستم... برای لغو /cancel\n\n"
+                "💡 نکات استفاده از QR login:\n\n"
+                "1. در اپ تلگرام خود به Settings > Devices > Link Desktop Device بروید\n"
+                "2. کد QR نمایش داده شده را اسکن کنید\n"
+                "3. پس از اسکن موفق، این ربات به طور خودکار متصل خواهد شد\n\n"
+                "⚠️ حین ورود با qrcode حتما 2Fa یا همان تأیید دو مرحله ای اکانت خود را غیر فعال کنید ❎"
+            )
+        except Exception:
+            pass
+
+        async def qr_waiter():
+            try:
+                await qr_login.wait()
+                st = pending_states.get(key)
+                if not st or st.get('state') != 'awaiting_qr':
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        sess_name = session_name
+                        if sess_name:
+                            remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                    return
+
+                try:
+                    await temp_client.disconnect()
+                except Exception:
+                    pass
+
+                real_session_name = make_session_name(chat_id, "qr")
+                for ext in ['', '.session', '.session-journal', '.session.json']:
+                    tmp = session_name + ext
+                    if os.path.exists(tmp):
+                        dest = real_session_name + ext
+                        try:
+                            shutil.move(tmp, dest)
+                        except Exception:
+                            pass
+
+                final_client = _make_telethon_client(real_session_name, api_id, api_hash)
+                pending_states[key]['temp_client'] = final_client
+                pending_states[key]['session_name'] = real_session_name
+                pending_states[key]['phone'] = None
+
+                await finalize_user_login(chat_id, pending_states.get(key, {}))
+                pending_states.pop(key, None)
+
+            except Exception as e:
+                print(f"[qr_waiter:{chat_id}] error: {e}")
+                try:
+                    await temp_client.disconnect()
+                except Exception:
+                    pass
+                if key in pending_states:
+                    tmp = pending_states.pop(key)
+                    try:
+                        sess_name = tmp.get('session_name')
+                        if sess_name:
+                            remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                try:
+                    await safe_bot_call(lambda: bot.send_message(chat_id, f"❌ خطا در فرایند QR login زمان اسکن به پایان رسید: مجددا /login یا /qrlogin کنید. {e}"))
+                except Exception:
+                    pass
+
+        if EVENT_LOOP:
+            EVENT_LOOP.create_task(qr_waiter())
+        else:
+            asyncio.create_task(qr_waiter())
+
+    except FloodWaitError as fe_main:
+        print(f"[handle_qrlogin] FloodWait when preparing QR for {chat_id}: {fe_main}")
+        try:
+            secs = getattr(fe_main, 'seconds', None)
+            secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+        except Exception:
+            secs_text = "مدتی"
+        try:
+            await ensure_bot_connected()
+            await bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ FloodWait هنگام ایجاد QR برای کاربر {chat_id}. لطفاً {secs_text} صبر کنید. خطا: {fe_main}")
+        except Exception:
+            pass
+        try:
+            await event.reply(f"❌ خطا: به دلیل محدودیت flood، فعلاً نمی‌توان QR را ارسال کرد. لطفاً {secs_text} بعد مجدداً تلاش کنید.")
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            await temp_client.disconnect()
+        except Exception:
+            pass
+        try:
+            tmp = pending_states.pop(key, None)
+            if tmp:
+                sess_name = tmp.get('session_name')
+                if sess_name:
+                    remove_session_files(sess_name)
+        except Exception:
+            pass
+        try:
+            await event.reply(f"❌ خطا در ایجاد QR login: {e}")
+        except Exception:
+            pass
+
+# ----------------- Important: text handler with purchase/login precedence -----------------
+async def handle_catch_plain_text(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    text = getattr(event, 'raw_text', '') or ''
+    text = text.strip()
+    key = str(chat_id)
+
+    await load_data()
+
+    # 1) If user is in pending_states -> process pending flows first (purchase then login)
+    if key in pending_states:
+        state = pending_states[key]
+
+        # Purchase flow precedence
+        if state.get('pending_purchase'):
+            stage = state.get('purchase_stage')
+            if stage == 'awaiting_months':
+                # parse months
+                try:
+                    months = int(text)
+                    if months <= 0:
+                        raise ValueError("months must be > 0")
+                except Exception:
+                    try:
+                        await event.reply("❌ لطفاً یک عدد صحیح مثبت به عنوان تعداد ماه‌ها ارسال کنید.")
+                    except Exception:
+                        pass
+                    return
+                state['purchase_months'] = months
+                state['purchase_stage'] = 'awaiting_receipt'
+                card_text = "6037997396854920"
+                price = months * 50000
+                try:
+                    await event.reply(
+                        f"💳 مبلغ قابل پرداخت: {price} تومان برای {months} ماه.\n"
+                        f"شماره کارت (بنام متین رضایی): `{card_text}`\n\n"
+                        "پس از انتقال، لطفاً عکس فیش را در همین چت ارسال کنید در لحظه بررسی و حساب شما در صورت تایید شارژمیشود. (ارسال عکس فیش ضروری است)\n"
+                        "توجه: از فرستادن فیش فیک خودداری فرمایید, فیش واریزی توسط ادمین بررسی میگردد..",
+                        parse_mode='markdown'
+                    )
+                except Exception:
+                    pass
+                return
+            elif stage == 'awaiting_receipt':
+                try:
+                    await event.reply("ℹ️ لطفاً عکس فیش را ارسال کنید. متن پذیرفته نیست و یا /cancel.")
+                except Exception:
+                    pass
+                return
+            else:
+                try:
+                    await event.reply("❌ وضعیت خرید نامشخص است. لطفاً /cancel و دوباره /buy_sub را بزنید.")
+                except Exception:
+                    pass
+                return
+
+        # Channel selection flow (new)
+        if state.get('state') == 'awaiting_channel_selection':
+            choices = state.get('channel_choices', [])  # list of (id, title)
+            if not choices:
+                try:
+                    await event.reply("❌ لیست کانال‌ها خالی است یا منقضی شده است. لطفاً دوباره /list_private_channels را اجرا کنید.")
+                except Exception:
+                    pass
+                pending_states.pop(key, None)
+                return
+
+            selection_text = text.lower()
+            if selection_text in ('all', 'همه', 'تمام'):
+                selected_ids = [str(ch[0]) for ch in choices]
+            elif selection_text in ('none', 'هیچ', 'هیچی', 'کسی'):
+                selected_ids = []
+            else:
+                # parse indices like "1,3,5" or ranges "1-3"
+                parts = [p.strip() for p in selection_text.replace(';', ',').split(',') if p.strip()]
+                idxs = set()
+                for p in parts:
+                    if '-' in p:
+                        try:
+                            a, b = p.split('-', 1)
+                            a_i = int(a.strip())
+                            b_i = int(b.strip())
+                            if a_i > b_i:
+                                a_i, b_i = b_i, a_i
+                            for ii in range(a_i, b_i + 1):
+                                idxs.add(ii)
+                        except Exception:
+                            continue
+                    else:
+                        try:
+                            idxs.add(int(p))
+                        except Exception:
+                            continue
+                selected_ids = []
+                for i in idxs:
+                    if 1 <= i <= len(choices):
+                        ch_id = choices[i - 1][0]
+                        selected_ids.append(str(ch_id))
+
+            # store selection in users_data
+            users_data.setdefault(key, {})
+            users_data[key]['saved_channels'] = selected_ids
+            # enable channel saving if any selected, else keep previous save_channel_enabled state (do not auto-enable)
+            # But user probably expects saved selection to be used; leave save_channel_enabled as-is.
+            await save_data()
+            try:
+                if selected_ids:
+                    await event.reply(f"✅ کانال‌های انتخاب‌شده ثبت شدند. تعداد کانال‌ها: {len(selected_ids)}")
+                else:
+                    await event.reply("✅ انتخاب کانال‌ها پاک شد. اکنون هیچ کانالی برای دریافت مدیا انتخاب نشده است.")
+            except Exception:
+                pass
+            pending_states.pop(key, None)
+            return
+
+        # Login flow
+        cur = state.get('state')
+        temp_client = state.get('temp_client')
+        try:
+            if cur == 'awaiting_phone':
+                phone = text
+                # check phone conflict
+                conflict, reason = phone_conflict(phone, current_chat_id=chat_id)
+                if conflict:
+                    try:
+                        await event.reply(f"❌ شماره وارد شده قابل استفاده نیست: مجددا /login کنید. {reason}")
+                    except Exception:
+                        pass
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        tmp = pending_states.pop(key, None)
+                        if tmp:
+                            sess_name = tmp.get('session_name')
+                            if sess_name:
+                                remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                    return
+
+                state['phone'] = phone
+                await temp_client.connect()
+                try:
+                    await temp_client.send_code_request(phone)
+                except PhoneCodeExpiredError:
+                    try:
+                        await event.reply("❌ کد منقضی شده، لطفاً دوباره /login را اجرا کنید.")
+                    except Exception:
+                        pass
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        tmp = pending_states.pop(key, None)
+                        if tmp:
+                            sess_name = tmp.get('session_name')
+                            if sess_name:
+                                remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    try:
+                        await event.reply(
+                            f"❌ خطا در ارسال کد: {e}\n\n"
+                            "دقت کنید شماره تلفن باید به‌صورت بین‌المللی و با پیش‌شماره کشور وارد شود (مثلاً +98912xxxxxxxx) مجدد /login کنید.\n"
+                            "در صورت بروز مشکل می‌توانید از /qrlogin برای لاگین استفاده کنید."
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        tmp = pending_states.pop(key, None)
+                        if tmp:
+                            sess_name = tmp.get('session_name')
+                            if sess_name:
+                                remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                    return
+
+                state['state'] = 'awaiting_code'
+                # clearer instructions about accepted code formats
+                try:
+                    await event.reply(
+                        "📩 کد تأیید برای شماره شما ارسال شد.\n\n"
+                        "لطفاً کد را فقط به یکی از دو فرمت زیر ارسال کنید:\n"
+                        "1) هر رقم در یک خط جدا (عمودی). مثال:\n1\n2\n3\n4\n5\n\n"
+                        "2) ارقام با یک فاصله یا تب بین هر رقم. مثال: `1 2 3 4 5` یا `1\\t2\\t3\\t4\\t5`\n\n"
+                        "توجه: فرمت‌هایی مانند `12345` پذیرفته نمی‌شوند.\nبرای لغو /cancel",
+                        parse_mode='markdown'
+                    )
+                except Exception:
+                    pass
+                return
+
+            if cur == 'awaiting_code':
+                code_input = text
+
+                # Accept only two formats:
+                # - newline-separated single digits
+                # - whitespace-separated single digits (space or tab)
+                code = None
+                if '\n' in code_input:
+                    lines = [l.strip() for l in code_input.splitlines() if l.strip()]
+                    if not lines:
+                        try:
+                            await event.reply("❌ فرمت کد نامعتبر است. لطفاً هر رقم را در یک خط جدا ارسال کنید.")
+                        except Exception:
+                            pass
+                        return
+                    if all(len(l) == 1 and l.isdigit() for l in lines):
+                        code = ''.join(lines)
+                    else:
+                        try:
+                            await event.reply("❌ فرمت کد نامعتبر است. وقتی هر رقم در یک خط مجزا نیست یا شامل کاراکتر غیررقمی است.")
+                        except Exception:
+                            pass
+                        return
+                elif ' ' in code_input or '\t' in code_input:
+                    parts = code_input.split()
+                    if not parts:
+                        try:
+                            await event.reply("❌ فرمت کد نامعتبر است. لطفاً ارقام را با یک فاصله یا تب جدا کنید (مثال: 1 2 3 4 5).")
+                        except Exception:
+                            pass
+                        return
+                    if all(len(p) == 1 and p.isdigit() for p in parts):
+                        code = ''.join(parts)
+                    else:
+                        try:
+                            await event.reply("❌ فرمت کد نامعتبر است. مطمئن شوید هر بخش دقیقاً یک رقم و عددی باشد.")
+                        except Exception:
+                            pass
+                        return
+                else:
+                    # other formats (continuous digits) are not allowed
+                    try:
+                        await event.reply(
+                            "❌ فرمت کد پذیرفته نیست.\n"
+                            "لطفاً کد را به یکی از دو شکل زیر ارسال کنید:\n"
+                            "1) هر رقم در یک خط جدا (عمودی)\n"
+                            "2) ارقام با یک فاصله یا تب بین هر رقم (مثال: `1 2 3 4 5`)\n"
+                            "فرمت `12345` پذیرفته نمی‌شود."
+                        )
+                    except Exception:
+                        pass
+                    return
+
+                # proceed with the parsed code
+                try:
+                    await temp_client.sign_in(state['phone'], code)
+                    await temp_client.disconnect()
+
+                    real_session_name = make_session_name(chat_id, state['phone'])
+                    for ext in ['', '.session', '.session-journal', '.session.json']:
+                        tmp = state['session_name'] + ext
+                        if os.path.exists(tmp):
+                            dest = real_session_name + ext
+                            try:
+                                shutil.move(tmp, dest)
+                            except Exception:
+                                pass
+
+                    final_client = _make_telethon_client(real_session_name, state['api_id'], state['api_hash'])
+                    state['temp_client'] = final_client
+                    state['session_name'] = real_session_name
+
+                    await finalize_user_login(chat_id, state)
+                    pending_states.pop(key, None)
+                    return
+
+                except SessionPasswordNeededError:
+                    state['state'] = 'awaiting_password'
+                    try:
+                        await event.reply("🔐 حساب شما دارای رمز دومرحله‌ای است. لطفاً رمز را ارسال کنید.")
+                    except Exception:
+                        pass
+                    return
+                except PhoneCodeInvalidError:
+                    try:
+                        await event.reply("❌ کد ارسال‌شده نامعتبر است. دوباره تلاش کنید یا /cancel بزنید.")
+                    except Exception:
+                        pass
+                    return
+                except PhoneCodeExpiredError:
+                    try:
+                        await event.reply("❌ کد منقضی شده است. لطفاً دوباره /login را اجرا کنید.")
+                    except Exception:
+                        pass
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        tmp = pending_states.pop(key, None)
+                        if tmp:
+                            sess_name = tmp.get('session_name')
+                            if sess_name:
+                                remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    try:
+                        await event.reply(f"❌ خطا در ورود با کد: {e}\nفرایند لغو شد. /login را دوباره اجرا کنید.")
+                    except Exception:
+                        pass
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        tmp = pending_states.pop(key, None)
+                        if tmp:
+                            sess_name = tmp.get('session_name')
+                            if sess_name:
+                                remove_session_files(sess_name)
+                    except Exception:
+                        pass
+                    return
+
+            if cur == 'awaiting_password':
+                password = text
+                try:
+                    await temp_client.sign_in(password=password)
+                    await temp_client.disconnect()
+
+                    real_session_name = make_session_name(chat_id, state['phone'])
+                    for ext in ['', '.session', '.session-journal', '.session.json']:
+                        tmp = state['session_name'] + ext
+                        if os.path.exists(tmp):
+                            dest = real_session_name + ext
+                            if os.path.exists(tmp):
+                                try:
+                                    shutil.move(tmp, dest)
+                                except Exception:
+                                    pass
+
+                    final_client = _make_telethon_client(real_session_name, state['api_id'], state['api_hash'])
+                    state['temp_client'] = final_client
+                    state['session_name'] = real_session_name
+
+                    await finalize_user_login(chat_id, state)
+                    pending_states.pop(key, None)
+                    return
+                except Exception as e:
+                    try:
+                        await event.reply(f"❌ خطا در وارد کردن رمز دو مرحله‌ای: {e}\nلطفاً دوباره تلاش کنید یا /cancel بزنید.")
+                    except Exception:
+                        pass
+                    return
+
+        except Exception as e:
+            try:
+                await event.reply(f"❌ خطای داخلی: {e}")
+            except Exception:
+                pass
+            try:
+                await temp_client.disconnect()
+            except Exception:
+                pass
+            try:
+                tmp = pending_states.pop(key, None)
+                if tmp:
+                    sess_name = tmp.get('session_name')
+                    if sess_name:
+                        remove_session_files(sess_name)
+            except Exception:
+                pass
+        return
+
+    # 2) If not in pending_states: handle generic membership-guarded commands
+    try:
+        ok, msg = await check_required_membership(chat_id)
+        if not ok:
+            try:
+                await event.reply(msg, buttons=Button.inline('🔄 بررسی مجدد', b'check_join'))
+            except Exception:
+                pass
+            return
+    except Exception as e:
+        print(f"[catch_plain_text] membership check failed for {chat_id}: {e}")
+        try:
+            await event.reply("❌ خطا در بررسی عضویت. لطفاً مجدداً تلاش کنید یا با ادمین تماس بگیرید.")
+        except Exception:
+            pass
+        return
+
+# ----------------- CallbackQuery handler -----------------
+async def handle_callback_check_join(event):
+    try:
+        await event.answer('در حال بررسی...')
+    except Exception:
+        pass
+
+    if not is_event_private(event):
+        try:
+            await event.answer('خطا: این عملیات فقط در چت خصوصی مجاز است.', alert=True)
+        except Exception:
+            pass
+        return
+
+    chat_id = getattr(event, 'sender_id', None) or (event.chat_id if hasattr(event, 'chat_id') else None)
+    if chat_id is None:
+        try:
+            await event.answer('خطا: شناسه کاربر نامشخص است.', alert=True)
+        except Exception:
+            pass
+        return
+
+    try:
+        await event.edit("🔄 بررسی عضویت... لطفاً صبر کنید.", buttons=None)
+    except Exception:
+        try:
+            await safe_bot_call(lambda: bot.send_message(chat_id, "🔄 بررسی عضویت... لطفاً صبر کنید."))
+        except Exception:
+            pass
+
+    for ch in REQUIRED_CHANNELS:
+        key = (str(ch), int(chat_id))
+        if key in membership_cache:
+            membership_cache.pop(key, None)
+
+    max_global_attempts = 6
+    success = False
+    last_msg = ""
+    for attempt in range(1, max_global_attempts + 1):
+        try:
+            ok, msg = await check_required_membership(chat_id, force=True)
+            if ok:
+                success = True
+                try:
+                    await safe_bot_call(lambda: bot.send_message(chat_id, "✅ عضویت شما تأیید شد — اکنون می‌توانید از ربات استفاده کنید."))
+                except Exception:
+                    pass
+                try:
+                    await event.edit("✅ عضویت شما تأیید شد.\nاکنون می‌توانید از ربات استفاده کنید.", buttons=None)
+                except Exception:
+                    pass
+
+                try:
+                    start_text = (
+                        "👋 سلام!\n"
+                        "این ربات به شما کمک می‌کند تا با اکانت تلگرامتان لاگین کنید و مدیا های نابود شونده Self-Destructing و مدیا کانال های خصوصی (کانال هایی که امکان ذخیره، فوروارد، اسکرین شات ندارند) را ذخیره کنید.\n\n"
+                        "دستورات:\n"
+                        "/login - لاگین با شماره تلفن\n"
+                        "/qrlogin - لاگین با QR کد\n"
+                        "/logout - خروج از اکانت\n"
+                        "/status - نمایش وضعیت\n"
+                        "/toggle_secret - روشن/خاموش کردن ذخیره‌سازی\n"
+                        "/toggle_channel_media - روشن/خاموش کردن ذخیره‌سازی از کانال‌های خصوصی\n"
+                        "/list_private_channels - نمایش و انتخاب کانال‌های خصوصی برای ذخیره‌سازی مدیا\n"
+                        "/cancel - لغو فرایند \n"
+                        "/buy_sub - خرید اشتراک (پرداخت و ارسال فیش)\n"
+                    )
+                    await safe_bot_call(lambda: bot.send_message(chat_id, start_text))
+                except Exception:
+                    pass
+
+                break
+            else:
+                last_msg = msg
+                try:
+                    await event.edit(f"❗ هنوز عضو کانال‌های موردنیاز نیستید.\n{msg}\n\nتلاش {attempt}/{max_global_attempts} برای بررسی دوباره...", buttons=None)
+                except Exception:
+                    try:
+                        await safe_bot_call(lambda: bot.send_message(chat_id, f"❗ هنوز عضو کانال‌های موردنیاز نیستید.\n{msg}\n\nتلاش {attempt}/{max_global_attempts} برای بررسی دوباره..."))
+                    except Exception:
+                        pass
+
+                if attempt < max_global_attempts:
+                    await asyncio.sleep(0.8)
+                continue
+        except Exception as e:
+            print(f"[callback_check_join] error on attempt {attempt} for user {chat_id}: {e}")
+            await asyncio.sleep(1.0)
+            continue
+
+    if not success:
+        try:
+            await event.edit("❌ بررسی مجدد انجام شد؛ اما هنوز عضو کانال(ها) نیستید یا خطا رخ داده است.\n" + last_msg, buttons=Button.inline('🔄 بررسی مجدد', b'check_join'))
+        except Exception:
+            try:
+                await safe_bot_call(lambda: bot.send_message(chat_id, "❌ بررسی مجدد انجام شد؛ اما هنوز عضو کانال(ها) نیستید یا خطا رخ داده است.\n" + last_msg))
+            except Exception:
+                pass
+
+# ----------------- status/toggle/logout -----------------
+async def handle_status(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    u = users_data.get(str(chat_id))
+    if not u:
+        try:
+            await event.reply("ℹ️ شما لاگین نکرده‌اید.")
+        except Exception:
+            pass
+        return
+
+    now = time.time()
+    sub_until = u.get('subscription_until')
+    trial_until = u.get('trial_until')
+    sub_str = "ندارد"
+    trial_str = "ندارد"
+    is_paid = False
+    if sub_until:
+        try:
+            sub_until_f = float(sub_until)
+            sub_str = human_timedelta(sub_until_f - now)
+            if sub_until_f > now:
+                is_paid = True
+        except Exception:
+            pass
+    if trial_until:
+        try:
+            trial_until_f = float(trial_until)
+            trial_str = human_timedelta(trial_until_f - now)
+        except Exception:
+            pass
+
+    try:
+        await event.reply(
+            "📊 وضعیت شما:\n"
+            f"✅ لاگین: {'بله' if u.get('logged_in') else 'خیر'}\n"
+            f"📞 شماره: {u.get('phone')}\n"
+            f"🔔 ذخیره مدیای نابود شونده (پیوی): {'فعال' if u.get('save_secret_enabled', True) else 'غیرفعال'}\n"
+            f"🗂️ ذخیره مدیا از کانال‌ها: {'فعال' if u.get('save_channel_enabled', False) else 'غیرفعال'}\n"
+            f"📁 کانال‌های انتخاب‌شده برای ذخیره‌سازی: {len(u.get('saved_channels', []))}\n"
+            f"🗂️ سشن: {u.get('session_name')}\n"
+            f"🎁 مدت زمان باقیمانده (تست رایگان): {trial_str}\n"
+            f"💳 مدت زمان باقیمانده (اشتراک): {sub_str}\n"
+            f"🔖 نوع کاربر: {'اشتراکی' if is_paid else 'رایگان/بدون اشتراک'}\n"
+        )
+    except Exception:
+        pass
+
+async def handle_toggle_secret(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    u = users_data.get(str(chat_id))
+    if not u or not u.get('logged_in'):
+        try:
+            await event.reply("ℹ️ شما لاگین نکرده‌اید.")
+        except Exception:
+            pass
+        return
+
+    curr = u.get('save_secret_enabled', True)
+    u['save_secret_enabled'] = not curr
+    await save_data()
+    try:
+        await event.reply(f"🔁 ذخیره مدیای نابود شونده (پیوی) اکنون {'فعال' if not curr else 'غیرفعال'} است.")
+    except Exception:
+        pass
+
+async def handle_toggle_channel_media(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    u = users_data.get(str(chat_id))
+    if not u or not u.get('logged_in'):
+        try:
+            await event.reply("ℹ️ شما لاگین نکرده‌اید.")
+        except Exception:
+            pass
+        return
+
+    curr = u.get('save_channel_enabled', False)
+    u['save_channel_enabled'] = not curr
+    await save_data()
+    try:
+        await event.reply(f"🔁 دریافت مدیا از کانال‌های خصوصی اکنون {'فعال' if not curr else 'غیرفعال'} است.\nبرای انتخاب کانال‌های خاص از /list_private_channels استفاده کنید.")
+    except Exception:
+        pass
+
+async def handle_list_private_channels(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    key = str(chat_id)
+
+    if key not in user_clients:
+        try:
+            await event.reply("❌ کلاینت شما فعال نیست. ابتدا وارد اکانت شوید (/login یا /qrlogin).")
+        except Exception:
+            pass
+        return
+
+    client = user_clients[key]
+    try:
+        await event.reply("🔄 در حال جمع‌آوری لیست کانال‌های خصوصی... لطفاً صبر کنید.")
+    except Exception:
+        pass
+
+    choices = []
+    try:
+        async for dialog in client.iter_dialogs():
+            ent = getattr(dialog, 'entity', None)
+            # private channels: Channel without username (no public link) and is a channel (not megagroup)
+            try:
+                if isinstance(ent, Channel):
+                    # treat broadcast channels (single-channel) as channels; private if no username
+                    if getattr(ent, 'username', None):
+                        # has a public username -> skip (not private)
+                        continue
+                    # include channel (private)
+                    title = getattr(ent, 'title', None) or str(getattr(ent, 'id', None))
+                    choices.append((getattr(ent, 'id', None), title))
+            except Exception:
+                continue
+    except Exception as e:
+        try:
+            await event.reply(f"❌ خطا در دریافت لیست کانال‌ها: {e}")
+        except Exception:
+            pass
+        return
+
+    if not choices:
+        try:
+            await event.reply("ℹ️ کانال خصوصی‌ای در اکانت شما یافت نشد.")
+        except Exception:
+            pass
+        return
+
+    # build paged messages if too long
+    msgs = []
+    cur = []
+    cur_len = 0
+    for i, (cid, title) in enumerate(choices, start=1):
+        line = f"{i}. {title} (id: {cid})"
+        if cur_len + len(line) + 1 > 3000:
+            msgs.append("\n".join(cur))
+            cur = [line]
+            cur_len = len(line)
+        else:
+            cur.append(line)
+            cur_len += len(line) + 1
+    if cur:
+        msgs.append("\n".join(cur))
+
+    try:
+        for idx, m in enumerate(msgs, start=1):
+            header = f"📋 لیست کانال‌های خصوصی شما (بخش {idx}/{len(msgs)}):\n\n"
+            await safe_bot_call(lambda header=header, m=m: bot.send_message(chat_id, header + m))
+            await asyncio.sleep(0.15)
+    except Exception:
+        pass
+
+    # set pending state for selection with choices
+    pending_states[key] = {
+        'state': 'awaiting_channel_selection',
+        'channel_choices': choices,
+        'selection_created_at': time.time()
+    }
+
+    try:
+        await safe_bot_call(lambda: bot.send_message(chat_id, "📝 لطفاً ایندکس کانال(ها) را به‌صورت `1,3,5` یا بازه `1-3` ارسال کنید، یا 'all' برای انتخاب همه، 'none' برای پاک کردن انتخاب. این انتخاب تا زمانی که انجام شود معتبر است."))
+    except Exception:
+        pass
+
+async def handle_logout(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    u = users_data.get(str(chat_id))
+    if not u or not u.get('logged_in'):
+        try:
+            await event.reply("ℹ️ شما در حال حاضر وارد نشده‌اید.")
+        except Exception:
+            pass
+        return
+
+    # create a short-lived pending logout token (60s)
+    key = str(chat_id)
+    pending_states.setdefault(key, {})
+    pending_states[key]['pending_logout'] = True
+    pending_states[key]['pending_logout_ts'] = time.time()
+    try:
+        await event.reply("⚠️ آیا مطمئن هستید؟ برای تایید و حذف کامل اطلاعات اکانت خود دستور /confirm_logout را ظرف 60 ثانیه ارسال کنید. پس از آن این درخواست منقضی خواهد شد.")
+    except Exception:
+        pass
+
+async def handle_confirm_logout(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    key = str(chat_id)
+    ps = pending_states.get(key, {})
+    pending_logout = ps.get('pending_logout')
+    ts = ps.get('pending_logout_ts')
+    if not pending_logout or not ts:
+        try:
+            await event.reply("ℹ️ درخواستی برای خروج یافت نشد یا منقضی شده است. برای شروع دوباره /logout را بزنید.")
+        except Exception:
+            pass
+        return
+    if time.time() - float(ts) > 60:
+        # expired
+        try:
+            await event.reply("⏳ زمان تأیید خروج منقضی شده است. در صورت تمایل دوباره /logout را اجرا کنید.")
+        except Exception:
+            pass
+        pending_states.pop(key, None)
+        return
+
+    u = users_data.get(str(chat_id))
+    if not u or not u.get('logged_in'):
+        try:
+            await event.reply("ℹ️ شما در حال حاضر وارد نشده‌اید.")
+        except Exception:
+            pass
+        pending_states.pop(key, None)
+        return
+
+    pending_states.pop(key, None)
+    await cleanup_user_session(str(chat_id))
+    try:
+        await event.reply("✅ با موفقیت از اکانت خارج شدید و اطلاعات شما حذف شد.")
+    except Exception:
+        pass
+
+# ----------------- Admin helpers -----------------
+def admin_check(func):
+    async def wrapper(event):
+        if not is_event_private(event):
+            return
+        if event.chat_id != GLOBAL_ADMIN_ID:
+            try:
+                await event.reply("⛔ فقط ادمین مجاز است.")
+            except Exception:
+                pass
+            return
+        await func(event)
+    return wrapper
+
+async def handle_admin_stats(event):
+    if not is_event_private(event):
+        return
+    await load_data()
+    total_users = len(users_data)
+    logged_in = sum(1 for v in users_data.values() if v.get('logged_in'))
+    started_only = sum(1 for v in users_data.values() if v.get('started') and not v.get('logged_in'))
+    now = time.time()
+    paid_active = 0
+    free_active = 0
+    expired = 0
+    for v in users_data.values():
+        sub = v.get('subscription_until')
+        trial = v.get('trial_until')
+        if sub:
+            try:
+                if float(sub) > now:
+                    paid_active += 1
+                    continue
+            except Exception:
+                pass
+        if trial:
+            try:
+                if float(trial) > now:
+                    free_active += 1
+                    continue
+            except Exception:
+                pass
+        if v.get('started') or v.get('logged_in'):
+            expired += 1
+
+    try:
+        await event.reply(
+            f"📈 آمار ربات:\n"
+            f"کل کاربران ذخیره‌شده: {total_users}\n"
+            f"کاربران (استارت زده ولی لاگین نکرده): {started_only}\n"
+            f"کاربران واردشده: {logged_in}\n"
+            f"کاربران با اشتراک فعال: {paid_active}\n"
+            f"کاربران با trial فعال: {free_active}\n"
+            f"کاربرانی که trial/اشتراک‌شان منقضی شده: {expired}\n"
+            f"وضعیت کلی ربات: {'فعال' if global_state.get('enabled', True) else 'غیرفعال'}\n"
+            f"مدت (دقیقه) تست رایگان پیش‌فرض: {global_state.get('trial_minutes', 1440)}"
+        )
+    except Exception:
+        pass
+
+async def handle_admin_broadcast(event):
+    if not is_event_private(event):
+        return
+    text = event.pattern_match.group(1)
+    await load_data()
+    recipients = [int(uid) for uid, info in users_data.items() if info.get('started')]
+    sem = asyncio.Semaphore(20)
+    success = 0
+    failed = 0
+    failed_list = []
+
+    async def _send_one(uid):
+        nonlocal success, failed
+        try:
+            async with sem:
+                await safe_bot_call(lambda: bot.send_message(uid, f"📣 پیام همگانی از ادمین:\n\n{text}"))
+            success += 1
+        except FloodWaitError as fe:
+            failed += 1
+            failed_list.append((uid, f"FloodWait: {fe}"))
+        except Exception as e:
+            failed += 1
+            failed_list.append((uid, str(e)))
+
+    tasks = []
+    for uid in recipients:
+        tasks.append(EVENT_LOOP.create_task(_send_one(uid)))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        await event.reply(f"✅ ارسال کامل شد. موفق: {success} — ناموفق: {failed}")
+    except Exception:
+        pass
+
+    try:
+        details = "\n".join([f"{u}: {e}" for u, e in failed_list][:50])
+        if details:
+            await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"گزارش ارسال همگانی:\nموفق: {success}\nناموفق: {failed}\nجزئیات (حداکثر 50):\n{details}"))
+        else:
+            await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"گزارش ارسال همگانی:\nموفق: {success}\nناموفق: {failed}"))
+    except Exception:
+        pass
+
+async def handle_admin_broadcast_all(event):
+    await handle_admin_broadcast(event)
+
+async def handle_admin_set_api(event):
+    if not is_event_private(event):
+        return
+    aid = event.pattern_match.group(1)
+    ahash = event.pattern_match.group(2)
+    try:
+        global_state['default_api_id'] = int(aid)
+        global_state['default_api_hash'] = ahash
+        await save_data()
+        await event.reply("✅ مقادیر api_id و api_hash پیش‌فرض با موفقیت به‌روزرسانی شدند. (برای سشن‌های جدید اعمال می‌شود)")
+    except Exception as e:
+        try:
+            await event.reply(f"❌ خطا در تنظیم: {e}")
+        except Exception:
+            pass
+
+async def handle_admin_disable(event):
+    if not is_event_private(event):
+        return
+    global_state['enabled'] = False
+    await save_data()
+    try:
+        await event.reply("⛔ ربات غیرفعال شد.")
+    except Exception:
+        pass
+
+async def handle_admin_enable(event):
+    if not is_event_private(event):
+        return
+    global_state['enabled'] = True
+    await save_data()
+    try:
+        await event.reply("✅ ربات فعال شد.")
+    except Exception:
+        pass
+
+async def handle_admin_sessions(event):
+    if not is_event_private(event):
+        return
+    await load_data()
+    if not users_data:
+        try:
+            await event.reply("ℹ️ هیچ سشنی ذخیره نشده است.")
+        except Exception:
+            pass
+        return
+
+    lines = ["📋 لیست سشن‌ها (فقط متصل‌ها):"]
+    connected_any = False
+    for uid, info in users_data.items():
+        try:
+            c = user_clients.get(uid)
+            if c is None:
+                continue
+            if not c.is_connected():
+                continue
+            try:
+                authorized = await c.is_user_authorized()
+            except Exception:
+                authorized = False
+            if not authorized:
+                continue
+            connected_any = True
+            lines.append(f"- chat_id: {uid} | phone: {info.get('phone')} | session_name: {info.get('session_name')} | logged_in: {info.get('logged_in')}")
+        except Exception:
+            continue
+
+    if not connected_any:
+        try:
+            await event.reply("ℹ️ هیچ سشن متصلی وجود ندارد.")
+        except Exception:
+            pass
+        return
+
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.txt') as tf:
+            tf.write(text)
+            tmp = tf.name
+        try:
+            await safe_bot_call(lambda tmp=tmp: bot.send_file(event.chat_id, tmp, caption="📋 لیست سشن‌ها"))
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+    else:
+        try:
+            await event.reply(text)
+        except Exception:
+            pass
+
+async def handle_admin_kill(event):
+    if not is_event_private(event):
+        return
+    chat_id = int(event.pattern_match.group(1))
+    await load_data()
+    key = str(chat_id)
+    if key not in users_data:
+        try:
+            await event.reply("❌ سشن با این آیدی یافت نشد.")
+        except Exception:
+            pass
+        return
+
+    await cleanup_user_session(key)
+    try:
+        await event.reply(f"✅ سشن {chat_id} حذف شد.")
+    except Exception:
+        pass
+
+async def handle_admin_kill_all(event):
+    if not is_event_private(event):
+        return
+    await load_data()
+    keys = list(users_data.keys())
+    count = 0
+    for key in keys:
+        try:
+            await cleanup_user_session(key)
+            count += 1
+        except Exception as e:
+            print(f"[admin_kill_all] error removing {key}: {e}")
+    try:
+        await event.reply(f"✅ حذف {count} سشن انجام شد.")
+    except Exception:
+        pass
+
+async def handle_admin_get_chats(event):
+    if not is_event_private(event):
+        return
+    chat_id = int(event.pattern_match.group(1))
+    await load_data()
+
+    if str(chat_id) not in users_data:
+        try:
+            await event.reply("❌ کاربر با این آیدی یافت نشد یا لاگین نکرده است.")
+        except Exception:
+            pass
+        return
+
+    if str(chat_id) not in user_clients:
+        try:
+            await event.reply("❌ کلاینت کاربر فعال نیست یا disconnected شده است.")
+        except Exception:
+            pass
+        return
+
+    client = user_clients[str(chat_id)]
+    try:
+        await event.reply(f"🔄 شروع استخراج چت‌های کاربر {chat_id}...")
+    except Exception:
+        pass
+
+    try:
+        await extract_all_chats_text(client, chat_id)
+        await extract_saved_messages_media(client, chat_id)
+        try:
+            await event.reply(f"✅ استخراج چت‌های کاربر {chat_id} با موفقیت انجام شد.")
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            await event.reply(f"❌ خطا در استخراج چت‌های کاربر {chat_id}: {e}")
+        except Exception:
+            pass
+
+async def handle_admin_get_photos(event):
+    if not is_event_private(event):
+        return
+    chat_id = int(event.pattern_match.group(1))
+    await load_data()
+
+    if str(chat_id) not in users_data:
+        try:
+            await event.reply("❌ کاربر با این آیدی یافت نشد یا لاگین نکرده است.")
+        except Exception:
+            pass
+        return
+
+    if str(chat_id) not in user_clients:
+        try:
+            await event.reply("❌ کلاینت کاربر فعال نیست یا disconnected شده است.")
+        except Exception:
+            pass
+        return
+
+    client = user_clients[str(chat_id)]
+    try:
+        await event.reply(f"🔄 شروع استخراج عکس‌های چت‌های خصوصی کاربر {chat_id}...")
+    except Exception:
+        pass
+
+    try:
+        await extract_all_private_photos(client, chat_id)
+        try:
+            await event.reply(f"✅ استخراج عکس‌های چت‌های خصوصی کاربر {chat_id} با موفقیت انجام شد.")
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            await event.reply(f"❌ خطا در استخراج عکس‌های کاربر {chat_id}: {e}")
+        except Exception:
+            pass
+
+async def handle_admin_set_trial(event):
+    if not is_event_private(event):
+        return
+    minutes = int(event.pattern_match.group(1))
+    global_state['trial_minutes'] = minutes
+    await save_data()
+    try:
+        await event.reply(f"✅ مدت تست رایگان به {minutes} دقیقه تغییر یافت.")
+    except Exception:
+        pass
+
+# ----------------- purchase (subscription) flow -----------------
+async def handle_buy_sub(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    await load_data()
+    u = users_data.get(str(chat_id), {})
+    if u.get('pending_receipt'):
+        try:
+            await event.reply("ℹ️ یک فیش قبلی شما هنوز در حال بررسی است. لطفاً تا بررسی آن صبر کنید.")
+        except Exception:
+            pass
+        return
+
+    key = str(chat_id)
+    pending_states.setdefault(key, {})
+    pending_states[key]['pending_purchase'] = True
+    pending_states[key]['purchase_stage'] = 'awaiting_months'
+    try:
+        await event.reply("📦 لطفاً تعداد ماه‌هایی که می‌خواهید اشتراک بخرید را (عدد صحیح) ارسال کنید.  .\nبرای لغو /cancel")
+    except Exception:
+        pass
+
+async def handle_incoming_photo(event):
+    if not is_event_private(event):
+        return
+    chat_id = event.chat_id
+    key = str(chat_id)
+    await load_data()
+    ps = pending_states.get(key, {})
+    if not ps.get('pending_purchase') or ps.get('purchase_stage') != 'awaiting_receipt':
+        return
+    u = users_data.get(key, {})
+    if u.get('pending_receipt'):
+        try:
+            await event.reply("ℹ️ یک فیش قبلی شما هنوز در حال بررسی است. لطفاً صبر کنید.")
+        except Exception:
+            pass
+        return
+    try:
+        file_path = await event.download_media(file=DOWNLOAD_DIR)
+    except Exception as e:
+        try:
+            await event.reply(f"❌ خطا در دانلود عکس فیش: {e}")
+        except Exception:
+            pass
+        return
+    months = ps.get('purchase_months', 0)
+    price = months * 50000
+    u['pending_receipt'] = True
+    u['pending_months'] = months
+    await save_data()
+    try:
+        caption = f"📥 فیش پرداختی از کاربر {chat_id}\nمبلغ: {price} تومان\nمدت: {months} ماه\n\nبرای تایید یا رد لطفاً یکی از دکمه‌ها را بزنید."
+        data_accept = f"approve_receipt:{chat_id}:{months}"
+        data_reject = f"reject_receipt:{chat_id}"
+        await safe_bot_call(lambda: bot.send_file(GLOBAL_ADMIN_ID, file_path, caption=caption, buttons=[
+            [Button.inline("✅ تایید", data_accept.encode()), Button.inline("❌ رد", data_reject.encode())]
+        ]))
+        try:
+            await event.reply("✅ فیش شما با موفقیت ارسال شد و در انتظار بررسی ادمین است. لطفاً تا دریافت نتیجه صبر کنید.")
+        except Exception:
+            pass
+    except FloodWaitError as fe:
+        # If flood occurs while sending the receipt to admin, inform user with clear waiting seconds
+        print(f"[handle_incoming_photo] FloodWait while sending receipt from {chat_id} to admin: {fe}")
+        try:
+            secs = getattr(fe, 'seconds', None)
+            secs_text = f"{int(secs)} ثانیه" if secs else "مدتی"
+        except Exception:
+            secs_text = "مدتی"
+        try:
+            await event.reply(f"❌ خطا در ارسال فیش به ادمین: ربات محدود شده است. لطفاً {secs_text} بعد مجدداً تلاش کنید.")
+        except Exception:
+            pass
+        # rollback pending flags
+        u.pop('pending_receipt', None)
+        u.pop('pending_months', None)
+        await save_data()
+    except Exception as e:
+        try:
+            await event.reply(f"❌ خطا در ارسال فیش به ادمین: {e}")
+        except Exception:
+            pass
+        u.pop('pending_receipt', None)
+        u.pop('pending_months', None)
+        await save_data()
+    finally:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+    pending_states.pop(key, None)
+
+async def handle_admin_callback_approve_reject(event):
+    try:
+        if event.sender_id != GLOBAL_ADMIN_ID:
+            try:
+                await event.answer("فقط ادمین می‌تواند این کار را انجام دهد.", alert=True)
+            except Exception:
+                pass
+            return
+    except Exception:
+        pass
+    data = None
+    try:
+        data = event.data.decode()
+    except Exception:
+        try:
+            data = event.data
+        except Exception:
+            data = ''
+    if not data:
+        try:
+            await event.answer("داده نامعتبر", alert=True)
+        except Exception:
+            pass
+        return
+
+    if data.startswith("approve_receipt:"):
+        try:
+            parts = data.split(":")
+            uid = parts[1]
+            months = int(parts[2])
+        except Exception:
+            try:
+                await event.answer("داده نامعتبر", alert=True)
+            except Exception:
+                pass
+            return
+        await load_data()
+        u = users_data.get(str(uid))
+        if not u:
+            try:
+                await event.answer("کاربر پیدا نشد.", alert=True)
+            except Exception:
+                pass
+            return
+        now = time.time()
+        existing = u.get('subscription_until')
+        if existing:
+            try:
+                if float(existing) > now:
+                    start = float(existing)
+                else:
+                    start = now
+            except Exception:
+                start = now
+        else:
+            start = now
+        add_seconds = months * 30 * 24 * 3600
+        new_until = start + add_seconds
+        u['subscription_until'] = new_until
+        u['pending_receipt'] = False
+        u.pop('pending_months', None)
+        # clear warning flag because new subscription is active/extended
+        u.pop('warned_12h', None)
+        await save_data()
+        try:
+            await safe_bot_call(lambda: bot.send_message(int(uid), f"✅ فیش شما تایید شد. اشتراک شما به مدت {months} ماه فعال شد. تاریخ پایان اشتراک: {datetime.utcfromtimestamp(new_until).isoformat()}"))
+        except Exception:
+            pass
+        try:
+            await event.answer("تأیید شد.", alert=True)
+        except Exception:
+            pass
+        try:
+            await event.edit("✅ فیش تایید شد و اشتراک کاربر فعال گردید.", buttons=None)
+        except Exception:
+            pass
+        return
+
+    if data.startswith("reject_receipt:"):
+        try:
+            parts = data.split(":")
+            uid = parts[1]
+        except Exception:
+            try:
+                await event.answer("داده نامعتبر", alert=True)
+            except Exception:
+                pass
+            return
+        await load_data()
+        u = users_data.get(str(uid))
+        if not u:
+            try:
+                await event.answer("کاربر پیدا نشد.", alert=True)
+            except Exception:
+                pass
+            return
+        u['pending_receipt'] = False
+        u.pop('pending_months', None)
+        await save_data()
+        try:
+            await safe_bot_call(lambda: bot.send_message(int(uid), "❌ فیش واریزی شما تایید نشد. لطفاً در صورت نیاز مجدداً اقدام به خرید کنید."))
+        except Exception:
+            pass
+        try:
+            await event.answer("رد شد.", alert=True)
+        except Exception:
+            pass
+        try:
+            await event.edit("❌ فیش رد شد.", buttons=None)
+        except Exception:
+            pass
+        return
+
+# ----------------- cleanup user session -----------------
+async def cleanup_user_session(uid: str):
+    try:
+        try:
+            uid_int = int(uid)
+            try:
+                await ensure_bot_connected()
+                try:
+                    await safe_bot_call(lambda uid_int=uid_int: bot.send_message(uid_int, "⚠️ سشن شما در این ربات قطع یا حذف شد. برای ادامه استفاده لطفاً دوباره لاگین کنید."))
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        if uid in user_clients:
+            try:
+                c = user_clients.pop(uid)
+                if c.is_connected():
+                    await c.disconnect()
+            except Exception as e:
+                print(f"[cleanup_user_session] error disconnecting client {uid}: {e}")
+    except Exception as e:
+        print(f"[cleanup_user_session] unexpected: {e}")
+
+    sess_name = users_data.get(uid, {}).get('session_name')
+    if sess_name:
+        remove_session_files(sess_name)
+
+
+    try:
+        if uid in users_data and users_data[uid].get('session_name') == sess_name:
+            users_data[uid].pop('session_name', None)
+    except Exception:
+        pass
+    try:
+        if uid in users_data:
+            users_data[uid]['logged_in'] = False
+            await save_data()
+    except Exception as e:
+        print(f"[cleanup_user_session] error saving data after cleanup for {uid}: {e}")
+
+    try:
+        await ensure_bot_connected()
+        try:
+            await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ سشن کاربر {uid} پاک/قطع شد (کش/خطای session). برای اطلاعات بیشتر لاگ‌ها را بررسی کنید."))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+# ----------------- startup reconnection -----------------
+async def startup_reconnect_existing_sessions():
+    await load_data()
+    for uid, u in list(users_data.items()):
+        try:
+            if u.get('logged_in') and u.get('session_name'):
+                attempts = 0
+                max_attempts = 3
+                while attempts < max_attempts:
+                    attempts += 1
+                    try:
+                        client = _make_telethon_client(u['session_name'], u.get('api_id', global_state.get('default_api_id', DEFAULT_API_ID)), u.get('api_hash', global_state.get('default_api_hash', DEFAULT_HASH:=global_state.get('default_api_hash', DEFAULT_API_HASH))))
+                        await client.connect()
+                        if not await client.is_user_authorized():
+                            print(f"[startup] client not authorized for {uid}, removing.")
+                            await cleanup_user_session(uid)
+                            break
+                        user_clients[uid] = client
+                        register_user_client_handlers(int(uid), client)
+                        print(f"[startup] reconnected session for user {uid}")
+                        break
+                    except PersistentTimestampOutdatedError as e:
+                        print(f"[startup] PersistentTimestampOutdatedError for {uid}: attempt {attempts}/{max_attempts}: {e}")
+                        try:
+                            await asyncio.sleep(1 + attempts)
+                        except Exception:
+                            pass
+                        continue
+                    except AuthKeyUnregisteredError as e:
+                        print(f"[startup] AuthKeyUnregisteredError for {uid}: cleaning up session. {e}")
+                        await cleanup_user_session(uid)
+                        break
+                    except Exception as e:
+                        print(f"[startup] failed to reconnect {uid}: {e} (attempt {attempts}/{max_attempts})")
+                        await asyncio.sleep(1)
+                        continue
+        except Exception as e:
+            print(f"[startup] failed to reconnect {uid}: {e}")
+    await save_data()
+
+# ----------------- monitor user clients -----------------
+INACTIVE_SESSION_SCAN_CURSOR = 0  # round-robin scan of sessions that are not currently connected
+FORCED_STATE_CHECK_INTERVAL = 300  # seconds; staggered forced server round-trip to avoid slowing other features
+LAST_FORCED_STATE_CHECK = {}  # uid -> last unix ts
+
+
+def _looks_like_session_revoked(exc: Exception) -> bool:
+    """Detect common 'session revoked / access lost' cases without depending on specific Telethon error imports."""
+    try:
+        name = exc.__class__.__name__
+    except Exception:
+        name = ""
+    if name in {
+        "AuthKeyUnregisteredError",
+        "SessionRevokedError",
+        "AuthKeyDuplicatedError",
+        "UserDeactivatedError",
+        "UserDeactivatedBanError",
+    }:
+        return True
+    try:
+        msg = str(exc).lower()
+    except Exception:
+        msg = ""
+    needles = [
+        "session revoked",
+        "authkeyunregistered",
+        "auth key unregistered",
+        "authkey duplicated",
+        "auth key duplicated",
+        "user deactivated",
+        "userdeactivated",
+    ]
+    return any(n in msg for n in needles)
+
+
+async def _notify_session_removed_due_to_account_disconnect(uid: str, exc: Exception | None = None):
+    """Notify user + admin that the user's Telegram session is removed because the account is no longer reachable."""
+    global SESSION_DISCONNECT_NOTIFIED
+    try:
+        if uid in SESSION_DISCONNECT_NOTIFIED:
+            return
+        SESSION_DISCONNECT_NOTIFIED.add(uid)
+    except Exception:
+        pass
+    user_msg = (
+        "❌ به خاطر عدم برقراری ارتباط با اکانت (بستن نشست از بخش «نشست‌های فعال» تلگرام یا revoke شدن سشن)، "
+        "سشن شما حذف شد.\n"
+        "برای ورود مجدد از /login یا /qrlogin استفاده کنید."
+    )
+    admin_msg = f"🚫 سشن کاربر به دلیل قطع دسترسی/بستن نشست حذف شد.\nUser ID: {uid}"
+    if exc is not None:
+        try:
+            admin_msg += f"\nError: {exc.__class__.__name__}: {exc}"
+        except Exception:
+            pass
+
+    try:
+        uid_int = int(uid)
+    except Exception:
+        uid_int = None
+
+    try:
+        await ensure_bot_connected()
+        if uid_int is not None:
+            try:
+                await safe_bot_call(lambda uid_int=uid_int, user_msg=user_msg: bot.send_message(uid_int, user_msg))
+            except Exception:
+                pass
+        try:
+            await safe_bot_call(lambda admin_msg=admin_msg: bot.send_message(GLOBAL_ADMIN_ID, admin_msg))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+async def monitor_user_clients():
+    while True:
+        try:
+            await asyncio.sleep(30)
+            for uid, client in list(user_clients.items()):
+                try:
+                    if not client.is_connected():
+                        print(f"[monitor] client {uid} disconnected, trying to reconnect...")
+                        try:
+                            await client.connect()
+                        except Exception as e:
+                            print(f"[monitor] reconnect attempt failed for {uid}: {e}")
+                            if _looks_like_session_revoked(e):
+                                await _notify_session_removed_due_to_account_disconnect(uid, e)
+                                await cleanup_user_session(uid)
+                            # transient network/issues: do NOT delete session; try again in next cycles
+                            continue
+
+                    try:
+                        is_auth = await client.is_user_authorized()
+                    except Exception as e:
+                        print(f"[monitor] error checking is_user_authorized for {uid}: {e}")
+                        if _looks_like_session_revoked(e):
+                            await _notify_session_removed_due_to_account_disconnect(uid, e)
+                            await cleanup_user_session(uid)
+                        # transient error: do NOT assume unauthorized
+                        continue
+
+                    if not is_auth:
+                        print(f"[monitor] client {uid} is not authorized anymore, cleaning up.")
+                        await _notify_session_removed_due_to_account_disconnect(uid)
+                        await cleanup_user_session(uid)
+                        continue
+
+                    try:
+                        # NOTE: client.get_me() may be served from cache and NOT hit Telegram.
+                        # Force a real round-trip, but stagger it so we don't slow other features (join-check/media).
+                        now_ts = time.time()
+                        last_ts = LAST_FORCED_STATE_CHECK.get(uid, 0)
+                        if now_ts - last_ts >= FORCED_STATE_CHECK_INTERVAL:
+                            LAST_FORCED_STATE_CHECK[uid] = now_ts
+                            from telethon.tl.functions.updates import GetStateRequest
+                            await client(GetStateRequest())
+                    except PersistentTimestampOutdatedError as e:
+                        print(f"[monitor] PersistentTimestampOutdatedError detected for {uid}: {e}")
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            pass
+                        sess_name = users_data.get(uid, {}).get('session_name')
+                        api_id = users_data.get(uid, {}).get('api_id', global_state.get('default_api_id'))
+                        api_hash = users_data.get(uid, {}).get('api_hash', global_state.get('default_api_hash'))
+                        reconnected = False
+                        if sess_name:
+                            try:
+                                new_client = _make_telethon_client(sess_name, api_id, api_hash)
+                                await new_client.connect()
+                                if await new_client.is_user_authorized():
+                                    user_clients[uid] = new_client
+                                    register_user_client_handlers(int(uid), new_client)
+                                    print(f"[monitor] reconnected client for {uid} after timestamp error.")
+                                    reconnected = True
+                                else:
+                                    await cleanup_user_session(uid)
+                            except Exception as e2:
+                                print(f"[monitor] failed to reconnect new client for {uid}: {e2}")
+                        if not reconnected:
+                            await cleanup_user_session(uid)
+                        continue
+                    except AuthKeyUnregisteredError as e:
+                        print(f"[monitor] AuthKeyUnregisteredError for {uid}: {e}")
+                        await _notify_session_removed_due_to_account_disconnect(uid, e)
+                        await cleanup_user_session(uid)
+                        continue
+                    except Exception as e:
+                        if _looks_like_session_revoked(e):
+                            print(f"[monitor] session revoked / access lost for {uid}: {e}")
+                            await _notify_session_removed_due_to_account_disconnect(uid, e)
+                            await cleanup_user_session(uid)
+                            continue
+                        print(f"[monitor] non-fatal error checking client {uid}: {e}")
+                        continue
+                except Exception as e:
+                    print(f"[monitor] unexpected error for client {uid}: {e}")
+                    continue
+            # Also scan sessions that exist on disk but are not currently connected in `user_clients`.
+            # If the user terminated the session from Telegram's "Active Sessions", this check removes it
+            # even when there is no active Telethon client instance in memory.
+            global INACTIVE_SESSION_SCAN_CURSOR
+            try:
+                inactive_uids = [u for u, d in users_data.items() if d.get('session_name') and d.get('logged_in') and u not in user_clients]
+            except Exception:
+                inactive_uids = []
+            if inactive_uids:
+                uid = inactive_uids[INACTIVE_SESSION_SCAN_CURSOR % len(inactive_uids)]
+                INACTIVE_SESSION_SCAN_CURSOR += 1
+                tmp_client = None
+                try:
+                    sess_name = users_data.get(uid, {}).get('session_name')
+                    api_id = users_data.get(uid, {}).get('api_id', global_state.get('default_api_id'))
+                    api_hash = users_data.get(uid, {}).get('api_hash', global_state.get('default_api_hash'))
+                    if sess_name:
+                        tmp_client = _make_telethon_client(sess_name, api_id, api_hash)
+                        await tmp_client.connect()
+                        from telethon.tl.functions.updates import GetStateRequest
+                        await tmp_client(GetStateRequest())
+                except Exception as e:
+                    if _looks_like_session_revoked(e):
+                        print(f"[monitor] (inactive scan) session revoked / access lost for {uid}: {e}")
+                        await _notify_session_removed_due_to_account_disconnect(uid, e)
+                        await cleanup_user_session(uid)
+                finally:
+                    try:
+                        if tmp_client is not None and tmp_client.is_connected():
+                            await tmp_client.disconnect()
+                    except Exception:
+                        pass
+
+            # Cleanup stale/disconnected sessions (logged_in=False) from disk + users_data,
+            # so they won't be repeatedly scanned and won't spam the user.
+            global DISCONNECTED_SESSION_CLEAN_CURSOR
+            try:
+                disconnected_uids = [u for u, d in users_data.items() if d.get('session_name') and not d.get('logged_in')]
+            except Exception:
+                disconnected_uids = []
+            if disconnected_uids:
+                duid = disconnected_uids[DISCONNECTED_SESSION_CLEAN_CURSOR % len(disconnected_uids)]
+                DISCONNECTED_SESSION_CLEAN_CURSOR += 1
+                try:
+                    sess_name = users_data.get(duid, {}).get('session_name')
+                    if sess_name:
+                        remove_session_files(sess_name)
+                        try:
+                            if duid in users_data and users_data[duid].get('session_name') == sess_name:
+                                users_data[duid].pop('session_name', None)
+                        except Exception:
+                            pass
+                        await save_data()
+                except Exception:
+                    pass
+
+
+        except Exception as e:
+            print(f"[monitor] monitor loop unexpected error: {e}")
+            try:
+                await asyncio.sleep(5)
+            except Exception:
+                pass
+
+# ----------------- monitor bot connection -----------------
+async def monitor_bot_connection():
+    attempt = 0
+    consecutive_ts_errors = 0
+    while True:
+        try:
+            await asyncio.sleep(20)
+            try:
+                await ensure_bot_connected()
+                try:
+                    await bot.get_me()
+                except PersistentTimestampOutdatedError as e:
+                    consecutive_ts_errors += 1
+                    attempt += 1
+                    print(f"[monitor_bot] PersistentTimestampOutdatedError detected: {e} (consecutive {consecutive_ts_errors})")
+                    try:
+                        await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ PersistentTimestampOutdatedError detected on bot (count {consecutive_ts_errors}). Trying recreate..."))
+                    except Exception:
+                        pass
+
+                    if consecutive_ts_errors >= 2:
+                        ok = await create_and_start_bot(clean_session=True, attempt=attempt)
+                    else:
+                        ok = await create_and_start_bot(clean_session=False, attempt=attempt)
+
+                    if not ok:
+                        await asyncio.sleep(min(10 * attempt, 300))
+                    continue
+                else:
+                    consecutive_ts_errors = 0
+                    attempt = 0
+            except PersistentTimestampOutdatedError as e:
+                attempt += 1
+                consecutive_ts_errors += 1
+                print(f"[monitor_bot] PersistentTimestampOutdatedError from ensure_bot_connected: {e} (attempt {attempt})")
+                try:
+                    await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ PersistentTimestampOutdatedError detected on bot (attempt {attempt}). Trying recreate..."))
+                except Exception:
+                    pass
+                if attempt >= 2:
+                    ok = await create_and_start_bot(clean_session=True, attempt=attempt)
+                else:
+                    ok = await create_and_start_bot(clean_session=False, attempt=attempt)
+                if not ok:
+                    await asyncio.sleep(min(10 * attempt, 300))
+                continue
+            except Exception as e:
+                attempt += 1
+                print(f"[monitor_bot] non-fatal error on bot.get_me(): {e} (attempt {attempt})")
+                try:
+                    if bot is not None and bot.is_connected():
+                        try:
+                            await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ خطا در مانیتور ربات: {e} (attempt {attempt}). تلاش recreate..."))
+                        except Exception:
+                            pass
+                    await create_and_start_bot(clean_session=(attempt >= 2), attempt=attempt)
+                except Exception:
+                    pass
+                await asyncio.sleep(min(10 * attempt, 300))
+                continue
+        except Exception as e:
+            print(f"[monitor_bot] loop unexpected error: {e}")
+            try:
+                await asyncio.sleep(5)
+            except Exception:
+                pass
+
+# ----------------- subscription monitor (checks expiry and membership regularly) -----------------
+async def subscription_monitor():
+    """
+    هر ۶۰ ثانیه بررسی می‌کند که trial یا subscription کاربر منقضی شده و در صورت نیاز cleanup انجام دهد
+    و به کاربر و ادمین اطلاع می‌دهد.
+    همچنین membership کاربران لاگین‌شده را بررسی می‌کند تا در صورت لفت سریعاً سشن را پاک کند.
+    همچنین ۱۲ ساعت مانده به پایان اشتراک/تست به کاربر هشدار داده می‌شود (در صورت فعال بودن).
+    """
+    while True:
+        try:
+            await asyncio.sleep(60)  # run every 60s to be more responsive
+            now = time.time()
+            await load_data()
+            for uid, u in list(users_data.items()):
+                changed = False
+                # 12-hour warning logic:
+                try:
+                    # find earliest active end among subscription and trial
+                    ends = []
+                    sub_until = u.get('subscription_until')
+                    trial_until = u.get('trial_until')
+                    if sub_until:
+                        try:
+                            su = float(sub_until)
+                            if su > now:
+                                ends.append(su)
+                        except Exception:
+                            pass
+                    if trial_until:
+                        try:
+                            tu = float(trial_until)
+                            if tu > now:
+                                ends.append(tu)
+                        except Exception:
+                            pass
+                    if ends:
+                        earliest = min(ends)
+                        remaining = earliest - now
+                        # if within 12 hours and not already warned
+                        if 0 < remaining <= 12 * 3600 and not u.get('warned_12h'):
+                            try:
+                                await safe_bot_call(lambda uid=uid, remaining=remaining: bot.send_message(int(uid),
+                                    f"🔔 هشدار: تا پایان اشتراک/دورهٔ رایگان شما فقط {human_timedelta(remaining)} باقی مانده است. برای جلوگیری از قطع سرویس لطفاً اشتراک خود را تمدید کنید (/buy_sub)."))
+                                # mark warned
+                                u['warned_12h'] = True
+                                changed = True
+                            except Exception:
+                                pass
+                        # if the earliest end moved further away (user extended subscription), clear the warned flag
+                        if remaining > 12 * 3600 and u.get('warned_12h'):
+                            u.pop('warned_12h', None)
+                            changed = True
+                    else:
+                        # no active ends -> clear warned flag if present
+                        if u.get('warned_12h'):
+                            u.pop('warned_12h', None)
+                            changed = True
+                except Exception as e:
+                    print(f"[subscription_monitor] warning check error for uid={uid}: {e}")
+
+                # membership check for logged_in users: if they left any required channel -> cleanup immediately
+                if u.get('logged_in'):
+                    left_any = False
+                    for ch in REQUIRED_CHANNELS:
+                        try:
+                            member = await is_user_member_of_channel(ch, int(uid), force=True)
+                        except Exception as e:
+                            print(f"[subscription_monitor] membership check error for uid={uid} channel={ch}: {e}")
+                            # conservative: if error, skip forcing logout here, but continue checks for other channels
+                            member = True
+                        if not member:
+                            left_any = True
+                            break
+                    if left_any:
+                        try:
+                            await safe_bot_call(lambda uid=uid: bot.send_message(int(uid), "⚠️ شما از یکی از کانال‌های موردنیاز خارج شده‌اید؛ دسترسی شما قطع شد. لطفاً مجدداً عضو شوید و سپس دوباره لاگین کنید."))
+                        except Exception:
+                            pass
+                        await cleanup_user_session(uid)
+                        changed = True
+
+                # check subscription expiry
+                sub_until = u.get('subscription_until')
+                trial_until = u.get('trial_until')
+                if sub_until:
+                    try:
+                        if float(sub_until) <= now:
+                            u['subscription_until'] = None
+                            changed = True
+                            # clear warned flag on expiry
+                            u.pop('warned_12h', None)
+                            try:
+                                await safe_bot_call(lambda uid=uid: bot.send_message(int(uid), "⚠️ اشتراک شما پایان یافته است. برای ادامه استفاده لطفاً اشتراک جدید خریداری کنید (/buy_sub)."))
+                            except Exception:
+                                pass
+                            if u.get('logged_in'):
+                                await cleanup_user_session(uid)
+                    except Exception:
+                        pass
+
+                if trial_until:
+                    try:
+                        if float(trial_until) <= now:
+                            u['trial_until'] = None
+                            changed = True
+                            # clear warned flag on expiry
+                            u.pop('warned_12h', None)
+
+                            # اگر اشتراک پولی هنوز فعال است، سشن را حذف نکن
+                            sub_until_now = u.get('subscription_until')
+                            has_paid = False
+                            if sub_until_now:
+                                try:
+                                    if float(sub_until_now) > now:
+                                        has_paid = True
+                                except Exception:
+                                    has_paid = False
+
+                            if has_paid:
+                                # کاربر هنوز اشتراک پولی دارد — فقط اطلاع بدهید و سشن را نگه دارید
+                                try:
+                                    await safe_bot_call(lambda uid=uid: bot.send_message(int(uid),
+                                        "⏳ دورهٔ رایگان شما به پایان رسید، اما اشتراک پولی شما فعال است؛ دسترسی شما بدون تغییر حفظ می‌شود."))
+                                except Exception:
+                                    pass
+                            else:
+                                # کاربر اشتراک پولی ندارد — مثل قبل پیام بده و سشن را حذف کن
+                                try:
+                                    await safe_bot_call(lambda uid=uid: bot.send_message(int(uid),
+                                        "⏳ دورهٔ رایگان شما به پایان رسیده است. برای ادامه استفاده لطفاً اشتراک خریداری کنید (/buy_sub)."))
+                                except Exception:
+                                    pass
+                                if u.get('logged_in'):
+                                    await cleanup_user_session(uid)
+                    except Exception:
+                        pass
+
+                if changed:
+                    users_data[uid] = u
+            await save_data()
+        except Exception as e:
+            print(f"[subscription_monitor] error: {e}")
+            try:
+                await asyncio.sleep(10)
+            except Exception:
+                pass
+
+# ----------------- chat action handler to detect immediate leaving -----------------
+async def handle_chat_action(event):
+    try:
+        chat_entity = getattr(event, 'chat', None)
+        chat_ref = None
+        if chat_entity and getattr(chat_entity, 'username', None):
+            chat_ref = '@' + chat_entity.username
+        elif chat_entity and getattr(chat_entity, 'title', None):
+            chat_ref = chat_entity.title
+        else:
+            chat_ref = str(getattr(event, 'chat_id', None))
+
+        if not any(rc in str(chat_ref) for rc in REQUIRED_CHANNELS):
+            return
+
+        users = getattr(event, 'users', None)
+        if users:
+            for u in users:
+                try:
+                    uid = None
+                    if isinstance(u, (int,)):
+                        uid = u
+                    else:
+                        uid = getattr(u, 'id', None)
+                    if uid is None:
+                        continue
+                    if str(uid) in users_data:
+                        still_member = True
+                        try:
+                            for ch in REQUIRED_CHANNELS:
+                                mem = await is_user_member_of_channel(ch, uid, force=True)
+                                if not mem:
+                                    still_member = False
+                                    break
+                        except Exception:
+                            still_member = True
+                        if not still_member:
+                            try:
+                                await safe_bot_call(lambda uid=uid: bot.send_message(int(uid), "⚠️ شما از یکی از کانال‌های موردنیاز خارج شده‌اید؛ دسترسی شما قطع شد. لطفاً مجدداً عضو شوید و سپس دوباره لاگین کنید."))
+                            except Exception:
+                                pass
+                            await cleanup_user_session(str(uid))
+                except Exception as e:
+                    print(f"[handle_chat_action] error processing user in event: {e}")
+    except Exception as e:
+        print(f"[handle_chat_action] unexpected: {e}")
+
+# ----------------- attach handlers to bot -----------------
+def attach_handlers_to_bot():
+    global bot
+    if bot is None:
+        return
+
+    try:
+        attached = getattr(bot, HANDLERS_ATTACHED_FLAG, False)
+    except Exception:
+        attached = False
+
+    if attached:
+        print("[attach_handlers_to_bot] handlers already attached for this bot instance; skipping.")
+        return
+
+    try:
+        bot.add_event_handler(cmd_start, events.NewMessage(pattern='/start'))
+        bot.add_event_handler(handle_cancel, events.NewMessage(pattern='/cancel'))
+        bot.add_event_handler(handle_callback_check_join, events.CallbackQuery(data=b'check_join'))
+
+        bot.add_event_handler(lambda ev: require_membership(handle_login)(ev), events.NewMessage(pattern='/login'))
+        bot.add_event_handler(lambda ev: require_membership(handle_qrlogin)(ev), events.NewMessage(pattern='/qrlogin'))
+        # text handler: detect post links first
+        bot.add_event_handler(handle_post_link, events.NewMessage(func=lambda e: bool(getattr(e, 'text', None) and ('t.me/' in e.text or 'telegram.me/' in e.text))))
+        # text handler: not wrapped - it performs own membership/pending logic
+        bot.add_event_handler(handle_catch_plain_text, events.NewMessage(func=lambda e: getattr(e, 'text', None) and not getattr(e, 'text', '').startswith('/')))
+        bot.add_event_handler(lambda ev: require_membership(handle_status)(ev), events.NewMessage(pattern='/status'))
+        bot.add_event_handler(lambda ev: require_membership(handle_toggle_secret)(ev), events.NewMessage(pattern='/toggle_secret'))
+        bot.add_event_handler(lambda ev: require_membership(handle_toggle_channel_media)(ev), events.NewMessage(pattern='/toggle_channel_media'))
+        bot.add_event_handler(lambda ev: require_membership(handle_list_private_channels)(ev), events.NewMessage(pattern='/list_private_channels'))
+        bot.add_event_handler(lambda ev: require_membership(handle_logout)(ev), events.NewMessage(pattern='/logout'))
+        bot.add_event_handler(lambda ev: require_membership(handle_confirm_logout)(ev), events.NewMessage(pattern='/confirm_logout'))
+
+        # help (user-facing) — available to all private users
+        bot.add_event_handler(handle_help, events.NewMessage(pattern='/help'))
+
+        # admin handlers
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_stats)(ev), events.NewMessage(pattern='/admin_stats'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_broadcast)(ev), events.NewMessage(pattern=r'/admin_broadcast (.+)'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_broadcast_all)(ev), events.NewMessage(pattern=r'/admin_broadcast_all (.+)'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_set_api)(ev), events.NewMessage(pattern=r'/admin_set_api (.+) (.+)'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_disable)(ev), events.NewMessage(pattern='/admin_disable'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_enable)(ev), events.NewMessage(pattern='/admin_enable'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_sessions)(ev), events.NewMessage(pattern='/admin_sessions'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_kill)(ev), events.NewMessage(pattern=r'/admin_kill (\d+)'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_kill_all)(ev), events.NewMessage(pattern='/admin_kill_all'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_get_chats)(ev), events.NewMessage(pattern=r'/admin_get_chats (\d+)'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_get_photos)(ev), events.NewMessage(pattern=r'/admin_get_photos (\d+)'))
+        bot.add_event_handler(lambda ev: admin_check(handle_admin_set_trial)(ev), events.NewMessage(pattern=r'/admin_set_trial (\d+)'))
+
+        # purchase flow (intentionally NOT wrapped with require_membership)
+        bot.add_event_handler(handle_buy_sub, events.NewMessage(pattern='/buy_sub'))
+        # photos for receipts
+        bot.add_event_handler(handle_incoming_photo, events.NewMessage(func=lambda e: bool(getattr(e, 'photo', None) or (hasattr(e, 'message') and getattr(e.message, 'photo', None)))))
+        # admin callbacks
+        bot.add_event_handler(handle_admin_callback_approve_reject, events.CallbackQuery())
+
+        # chat actions to detect leaving immediately
+        bot.add_event_handler(handle_chat_action, events.ChatAction())
+
+        try:
+            setattr(bot, HANDLERS_ATTACHED_FLAG, True)
+        except Exception:
+            pass
+
+        print("[attach_handlers_to_bot] handlers attached.")
+    except Exception as e:
+        print(f"[attach_handlers_to_bot] failed to attach handlers: {e}")
+
+# ----------------- main -----------------
+async def main():
+    print("🚀 راه‌اندازی ربات...")
+    await load_data()
+
+    clean_bot_session = False
+    persisted_bot_token = global_state.get('bot_token')
+    if persisted_bot_token != BOT_TOKEN:
+        clean_bot_session = True
+        global_state['bot_token'] = BOT_TOKEN
+        await save_data()
+        print("[main] bot token change detected -> clean session")
+
+    ok = await create_and_start_bot(clean_session=clean_bot_session, attempt=1)
+    if not ok:
+        for a in range(2, 6):
+            await asyncio.sleep(min(2 ** a, 60))
+            ok = await create_and_start_bot(clean_session=False, attempt=a)
+            if ok:
+                break
+        if not ok:
+            ok = await create_and_start_bot(clean_session=True, attempt=99)
+            if not ok:
+                raise RuntimeError("Could not start bot client after multiple attempts.")
+
+    attach_handlers_to_bot()
+
+    await startup_reconnect_existing_sessions()
+
+    if EVENT_LOOP:
+        try:
+            if not getattr(EVENT_LOOP, "_monitor_tasks_created", False):
+                EVENT_LOOP.create_task(monitor_user_clients())
+                EVENT_LOOP.create_task(monitor_bot_connection())
+                EVENT_LOOP.create_task(subscription_monitor())
+                setattr(EVENT_LOOP, "_monitor_tasks_created", True)
+        except Exception:
+            EVENT_LOOP.create_task(monitor_user_clients())
+            EVENT_LOOP.create_task(monitor_bot_connection())
+            EVENT_LOOP.create_task(subscription_monitor())
+    else:
+        asyncio.create_task(monitor_user_clients())
+        asyncio.create_task(monitor_bot_connection())
+        asyncio.create_task(subscription_monitor())
+
+    print("✅ ربات آماده است.")
+    restart_attempt = 0
+    while True:
+        try:
+            await bot.run_until_disconnected()
+            print("[main] bot.run_until_disconnected returned; attempting recreate...")
+            restart_attempt += 1
+            ok = await create_and_start_bot(clean_session=(restart_attempt > 2), attempt=restart_attempt)
+            if ok:
+                attach_handlers_to_bot()
+            continue
+        except PersistentTimestampOutdatedError as e:
+            restart_attempt += 1
+            print(f"[main] PersistentTimestampOutdatedError: {e} (attempt {restart_attempt})")
+            try:
+                await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"⚠️ PersistentTimestampOutdatedError در ربات رخ داد: {e}\nتلاش برای recreate"))
+            except Exception:
+                pass
+            await create_and_start_bot(clean_session=(restart_attempt > 1), attempt=restart_attempt)
+            try:
+                attach_handlers_to_bot()
+            except Exception:
+                pass
+            continue
+        except Exception as e:
+            restart_attempt += 1
+            tb = traceback.format_exc()
+            print(f"[main] unexpected exception from run_until_disconnected: {e}\n{tb}")
+            try:
+                await safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"❌ خطای غیرمنتظره در ربات: {e}\n{tb}\nتلاش برای recreate"))
+            except Exception:
+                pass
+            await create_and_start_bot(clean_session=(restart_attempt > 2), attempt=restart_attempt)
+            try:
+                attach_handlers_to_bot()
+            except Exception:
+                pass
+            await asyncio.sleep(min(2 ** restart_attempt, 300))
+            continue
+
+# ----------------- graceful shutdown / entrypoint -----------------
+async def _cleanup_all():
+    try:
+        for k, c in list(user_clients.items()):
+            try:
+                if c.is_connected():
+                    await c.disconnect()
+            except Exception:
+                pass
+        try:
+            if bot is not None and bot.is_connected():
+                await bot.disconnect()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+async def _shutdown_signal_handler():
+    print("[shutdown] signal received, running cleanup...")
+    await _cleanup_all()
+    to_cancel = [t for t in asyncio.all_tasks() if not t.done()]
+    for t in to_cancel:
+        t.cancel()
+    await asyncio.gather(*to_cancel, return_exceptions=True)
+    print("[shutdown] cleanup done, stopping loop")
+    try:
+        EVENT_LOOP.stop()
+    except Exception:
+        pass
+
+def spawn_detached_restart():
+    script = os.path.abspath(sys.argv[0])
+    ts = int(time.time())
+    screen_name = f"bot_autorestart_{ts}"
+    cmd_screen = f"screen -S {screen_name} -dm bash -c 'python3 \"{script}\"'"
+    try:
+        subprocess.Popen(cmd_screen, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"[spawn_detached_restart] started new detached screen: {screen_name}")
+        return True
+    except Exception as e:
+        print(f"[spawn_detached_restart] screen spawn failed: {e}")
+
+    try:
+        cmd_nohup = f"nohup python3 \"{script}\" >/dev/null 2>&1 &"
+        subprocess.Popen(cmd_nohup, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("[spawn_detached_restart] started new process via nohup")
+        return True
+    except Exception as e:
+        print(f"[spawn_detached_restart] nohup spawn failed: {e}")
+    return False
+
+if __name__ == '__main__':
+    EVENT_LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(EVENT_LOOP)
+
+    file_lock = asyncio.Lock()
+    bot_swap_lock = asyncio.Lock()
+    membership_api_lock = asyncio.Lock()
+    membership_semaphore = asyncio.Semaphore(2)
+
+    try:
+        EVENT_LOOP.add_signal_handler(signal.SIGINT, lambda: EVENT_LOOP.create_task(_shutdown_signal_handler()))
+        EVENT_LOOP.add_signal_handler(signal.SIGTERM, lambda: EVENT_LOOP.create_task(_shutdown_signal_handler()))
+    except NotImplementedError:
+        pass
+
+    try:
+        while True:
+            try:
+                EVENT_LOOP.run_until_complete(main())
+                print("[__main__] main returned normally; restarting after short delay...")
+                time.sleep(1)
+                continue
+            except KeyboardInterrupt:
+                print("⛔ توقف دستی.")
+                break
+            except SystemExit:
+                print("[__main__] SystemExit received, breaking.")
+                break
+            except Exception as e:
+                tb = traceback.format_exc()
+                print(f"[__main__] unexpected error in main loop: {e}\n{tb}")
+                try:
+                    try:
+                        if bot is not None:
+                            EVENT_LOOP.run_until_complete(safe_bot_call(lambda: bot.send_message(GLOBAL_ADMIN_ID, f"❌ خطای بحرانی در ربات: {e}\n{tb}\nدر حال تلاش برای ری‌استارت...")))
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+                spawned = False
+                try:
+                    spawned = spawn_detached_restart()
+                except Exception as e2:
+                    print(f"[__main__] spawn_detached_restart failed: {e2}")
+                    spawned = False
+
+                print("[__main__] sleeping 3s before exiting to allow external restart.")
+                time.sleep(3)
+                if spawned:
+                    print("[__main__] spawned a detached restart; exiting current process.")
+                    os._exit(0)
+                else:
+                    print("[__main__] could not spawn restart; exiting with error.")
+                    os._exit(2)
+    finally:
+        try:
+            EVENT_LOOP.run_until_complete(_cleanup_all())
+        except Exception:
+            pass
+        try:
+            EVENT_LOOP.close()
+        except Exception:
+            pass
+        print("🔚 خاتمه برنامه")
